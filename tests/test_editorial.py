@@ -117,9 +117,7 @@ def test_decode_decision_garbage_index_defaults_to_top() -> None:
 
 def test_decode_decision_discussion_as_plain_string() -> None:
     candidates = [_classified("A", "https://e.com/a")]
-    decision = decode_decision(
-        {"chosen_index": 0, "discussion": "¿Pregunta suelta?"}, candidates
-    )
+    decision = decode_decision({"chosen_index": 0, "discussion": "¿Pregunta suelta?"}, candidates)
     assert decision.discussion.question == "¿Pregunta suelta?"
 
 
@@ -299,9 +297,7 @@ async def test_deepagents_workflow_filters_low_relevance(
 def test_container_selects_deepagents_engine(monkeypatch) -> None:
     import app.infrastructure.editorial.factory as factory
 
-    monkeypatch.setattr(
-        factory, "build_editorial_brain", lambda *a, **k: FakeEditorialBrain()
-    )
+    monkeypatch.setattr(factory, "build_editorial_brain", lambda *a, **k: FakeEditorialBrain())
     settings = Settings(
         openai_api_key="test-key",
         embedding_provider=EmbeddingProviderName.HASH,
