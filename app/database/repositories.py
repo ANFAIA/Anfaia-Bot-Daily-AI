@@ -1,0 +1,151 @@
+"""SQLAlchemy implementation of the news repository.
+
+Uses pgvector for similarity search (cosine distance). Similarity is derived as
+`1 - cosine_distance`.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from app.database.models import NewsArticle, NewsEmbedding, WorkflowCounter
+from app.database.session import Database
+from app.domain.entities import PublishableArticle
+from app.domain.value_objects import Category
+from app.interfaces.repositories import (
+    NewsRepository,
+    SimilarArticle,
+    StatsSnapshot,
+    StoredArticle,
+)
+
+COUNTER_ANALYZED = "analyzed"
+COUNTER_PUBLISHED = "published"
+COUNTER_DISCARDED = "discarded"
+
+
+class SqlAlchemyNewsRepository(NewsRepository):
+    """News repository backed by PostgreSQL + pgvector."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def url_exists(self, url_fingerprint: str) -> bool:
+        async with self._db.session() as session:
+            stmt = select(NewsArticle.id).where(NewsArticle.url_fingerprint == url_fingerprint)
+            return (await session.execute(stmt)).first() is not None
+
+    async def find_similar(
+        self, embedding: list[float], threshold: float, limit: int = 5
+    ) -> list[SimilarArticle]:
+        max_distance = 1.0 - threshold
+        distance = NewsEmbedding.embedding.cosine_distance(embedding)
+        async with self._db.session() as session:
+            stmt = (
+                select(
+                    NewsEmbedding.article_id,
+                    NewsArticle.url,
+                    distance.label("distance"),
+                )
+                .join(NewsArticle, NewsArticle.id == NewsEmbedding.article_id)
+                .where(distance <= max_distance)
+                .order_by(distance)
+                .limit(limit)
+            )
+            rows = (await session.execute(stmt)).all()
+        return [
+            SimilarArticle(article_id=r.article_id, url=r.url, similarity=1.0 - r.distance)
+            for r in rows
+        ]
+
+    async def save_published(
+        self, article: PublishableArticle, embedding: list[float] | None
+    ) -> int:
+        item = article.news_item
+        async with self._db.session() as session:
+            orm_article = NewsArticle(
+                title=item.title,
+                url=item.url,
+                url_fingerprint=item.url_fingerprint,
+                source=item.source,
+                category=article.category.value,
+                published_at=item.published_at,
+                relevance_score=article.relevance_score.value,
+                summary=item.summary,
+                discord_message_id=article.discord_message_id,
+            )
+            session.add(orm_article)
+            await session.flush()
+            if embedding is not None:
+                session.add(NewsEmbedding(article_id=orm_article.id, embedding=embedding))
+            await session.flush()
+            return orm_article.id
+
+    async def increment_counter(self, name: str, amount: int = 1) -> None:
+        async with self._db.session() as session:
+            stmt = (
+                pg_insert(WorkflowCounter)
+                .values(name=name, value=amount)
+                .on_conflict_do_update(
+                    index_elements=[WorkflowCounter.name],
+                    set_={"value": WorkflowCounter.value + amount},
+                )
+            )
+            await session.execute(stmt)
+
+    async def list_articles(
+        self, *, limit: int, offset: int, category: Category | None = None
+    ) -> list[StoredArticle]:
+        async with self._db.session() as session:
+            stmt = select(NewsArticle).order_by(NewsArticle.created_at.desc())
+            if category is not None:
+                stmt = stmt.where(NewsArticle.category == category.value)
+            stmt = stmt.limit(limit).offset(offset)
+            rows = (await session.execute(stmt)).scalars().all()
+        return [self._to_stored(row) for row in rows]
+
+    async def get_article(self, article_id: int) -> StoredArticle | None:
+        async with self._db.session() as session:
+            row = await session.get(NewsArticle, article_id)
+            return self._to_stored(row) if row else None
+
+    async def stats(self) -> StatsSnapshot:
+        async with self._db.session() as session:
+            counters = dict(
+                (await session.execute(select(WorkflowCounter.name, WorkflowCounter.value))).all()
+            )
+            by_category = dict(
+                (
+                    await session.execute(
+                        select(NewsArticle.category, func.count()).group_by(NewsArticle.category)
+                    )
+                ).all()
+            )
+            published = (
+                await session.execute(select(func.count()).select_from(NewsArticle))
+            ).scalar_one()
+
+        return StatsSnapshot(
+            analyzed=counters.get(COUNTER_ANALYZED, 0),
+            published=max(counters.get(COUNTER_PUBLISHED, 0), published),
+            discarded=counters.get(COUNTER_DISCARDED, 0),
+            by_category=by_category,
+            last_run_at=None,
+            last_run_status=None,
+        )
+
+    @staticmethod
+    def _to_stored(row: NewsArticle) -> StoredArticle:
+        return StoredArticle(
+            id=row.id,
+            title=row.title,
+            url=row.url,
+            source=row.source,
+            category=Category.from_str(row.category),
+            relevance_score=row.relevance_score,
+            summary=row.summary,
+            published_at=row.published_at,
+            discord_message_id=row.discord_message_id,
+            created_at=row.created_at,
+        )

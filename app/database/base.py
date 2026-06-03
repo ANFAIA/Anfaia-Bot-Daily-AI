@@ -1,0 +1,9 @@
+"""SQLAlchemy 2.x declarative base."""
+
+from __future__ import annotations
+
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    """Common base for all ORM models."""

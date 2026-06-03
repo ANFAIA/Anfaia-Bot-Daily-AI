@@ -1,0 +1,148 @@
+"""Dependency injection container (composition root).
+
+This is the only place where concrete adapters are wired up with the business
+logic. It builds the object graph from the configuration and exposes it to the
+inbound adapters (API and scheduler). Keeping it here lets us swap any
+implementation (LLM, source, repository, publisher) without touching the rest.
+"""
+
+from __future__ import annotations
+
+import httpx
+
+from app.agents import (
+    DiscordPublisherAgent,
+    DiscussionGeneratorAgent,
+    DuplicateDetectorAgent,
+    NewsClassifierAgent,
+    NewsCollectorAgent,
+    NewsEditorAgent,
+)
+from app.agents.classic_editorial_brain import ClassicEditorialBrain
+from app.application.use_cases import (
+    GetNewsUseCase,
+    GetStatsUseCase,
+    ListNewsUseCase,
+    RunDailyWorkflowUseCase,
+    SendTestMessageUseCase,
+)
+from app.core.config import Settings, WorkflowEngine
+from app.core.logging import get_logger
+from app.database.repositories import SqlAlchemyNewsRepository
+from app.database.session import Database
+from app.infrastructure.discord.discord_publisher import DiscordPublisher
+from app.infrastructure.discord.null_publisher import NullPublisher
+from app.infrastructure.embeddings.factory import build_embedding_provider
+from app.infrastructure.llm.factory import build_llm_provider
+from app.infrastructure.sources.registry import build_default_sources
+from app.interfaces.editorial import EditorialBrain
+from app.interfaces.publisher import Publisher
+from app.interfaces.repositories import NewsRepository
+from app.workflows.base import NewsWorkflow
+from app.workflows.daily_news_workflow import DailyNewsWorkflow
+from app.workflows.deepagents_news_workflow import DeepAgentsNewsWorkflow
+
+logger = get_logger(__name__)
+
+
+class Container:
+    """Process dependency graph, built only once at startup."""
+
+    def __init__(self, settings: Settings, *, repository: NewsRepository | None = None) -> None:
+        self.settings = settings
+
+        # --- Shared HTTP client ---
+        self.http_client = httpx.AsyncClient(
+            timeout=settings.http_timeout_seconds,
+            headers={"User-Agent": settings.http_user_agent},
+            follow_redirects=True,
+        )
+
+        # --- Persistence ---
+        self.database: Database | None = None
+        if repository is not None:
+            self.repository = repository
+        else:
+            self.database = Database(settings.database_url, echo=False)
+            self.repository = SqlAlchemyNewsRepository(self.database)
+
+        # --- Outbound adapters ---
+        self.llm = build_llm_provider(settings, self.http_client)
+        self.embeddings = build_embedding_provider(settings, self.http_client)
+        self.publisher: Publisher = self._build_publisher(settings)
+        self.sources = build_default_sources(self.http_client)
+
+        # --- Agents ---
+        self.collector_agent = NewsCollectorAgent(
+            self.sources, max_items_per_source=settings.max_items_per_source
+        )
+        self.classifier_agent = NewsClassifierAgent(self.llm)
+        self.duplicate_agent = DuplicateDetectorAgent(
+            self.repository,
+            self.embeddings,
+            similarity_threshold=settings.duplicate_similarity_threshold,
+        )
+        self.editor_agent = NewsEditorAgent(self.llm)
+        self.discussion_agent = DiscussionGeneratorAgent(self.llm)
+        self.publisher_agent = DiscordPublisherAgent(self.publisher)
+
+        # --- Workflow ---
+        self.workflow: NewsWorkflow = self._build_workflow(settings)
+
+        # --- Use cases ---
+        self.run_workflow_uc = RunDailyWorkflowUseCase(self.workflow)
+        self.list_news_uc = ListNewsUseCase(self.repository)
+        self.get_news_uc = GetNewsUseCase(self.repository)
+        self.stats_uc = GetStatsUseCase(self.repository)
+        self.test_discord_uc = SendTestMessageUseCase(self.publisher)
+
+    def _build_workflow(self, settings: Settings) -> NewsWorkflow:
+        """Select the orchestration engine based on `settings.workflow_engine`.
+
+        The default sequential pipeline is fully self-contained. The deepagents
+        engine swaps only the editorial decision for a deliberative brain,
+        reusing the same collector/classifier/dedup/publisher agents and falling
+        back to the classic brain on any error.
+        """
+        if settings.workflow_engine is WorkflowEngine.DEEPAGENTS:
+            from app.infrastructure.editorial.factory import build_editorial_brain
+
+            classic_brain: EditorialBrain = ClassicEditorialBrain(
+                self.editor_agent, self.discussion_agent
+            )
+            brain = build_editorial_brain(settings, self.http_client, fallback=classic_brain)
+            logger.info("container.workflow_engine", engine="deepagents")
+            return DeepAgentsNewsWorkflow(
+                collector=self.collector_agent,
+                classifier=self.classifier_agent,
+                duplicate_detector=self.duplicate_agent,
+                brain=brain,
+                publisher=self.publisher_agent,
+                repository=self.repository,
+                min_relevance_score=settings.min_relevance_score,
+                shortlist_size=settings.editorial_shortlist_size,
+            )
+
+        return DailyNewsWorkflow(
+            collector=self.collector_agent,
+            classifier=self.classifier_agent,
+            duplicate_detector=self.duplicate_agent,
+            editor=self.editor_agent,
+            discussion_generator=self.discussion_agent,
+            publisher=self.publisher_agent,
+            repository=self.repository,
+            min_relevance_score=settings.min_relevance_score,
+        )
+
+    @staticmethod
+    def _build_publisher(settings: Settings) -> Publisher:
+        if settings.discord_token and settings.discord_channel_id:
+            return DiscordPublisher(settings.discord_token, settings.discord_channel_id)
+        logger.warning("container.discord_not_configured")
+        return NullPublisher()
+
+    async def aclose(self) -> None:
+        """Release resources (HTTP client and database connections)."""
+        await self.http_client.aclose()
+        if self.database is not None:
+            await self.database.dispose()

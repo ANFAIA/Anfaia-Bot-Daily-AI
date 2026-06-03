@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: anfaia-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-anfaia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-anfaia}
+      POSTGRES_DB: ${POSTGRES_DB:-anfaia}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-anfaia} -d ${POSTGRES_DB:-anfaia}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Extras installed into the image. "deepagents" enables
+        # WORKFLOW_ENGINE=deepagents; set it to "" for a minimal image.
+        INSTALL_EXTRAS: ${INSTALL_EXTRAS:-deepagents}
+    container_name: anfaia-app
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the DB host is the `postgres` service (not
+      # localhost). We set both the host part and a fully assembled DATABASE_URL
+      # built from the POSTGRES_* credentials in .env, so the connection works
+      # regardless of how the app/entrypoint resolves the DSN.
+      POSTGRES_HOST: postgres
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-anfaia}:${POSTGRES_PASSWORD:-anfaia}@postgres:5432/${POSTGRES_DB:-anfaia}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
