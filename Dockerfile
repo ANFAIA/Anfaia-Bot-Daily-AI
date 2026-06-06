@@ -24,9 +24,10 @@ COPY app ./app
 RUN pip install --upgrade pip \
     && if [ -n "$INSTALL_EXTRAS" ]; then pip install ".[$INSTALL_EXTRAS]"; else pip install .; fi
 
-# Copy the rest of the project (alembic, entrypoint, etc.).
+# Copy the rest of the project (alembic, scripts, entrypoint, etc.).
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY scripts ./scripts
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
