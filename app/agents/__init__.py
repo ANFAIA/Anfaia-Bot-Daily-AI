@@ -6,6 +6,7 @@ from app.agents.duplicate_detector import DuplicateDecision, DuplicateDetectorAg
 from app.agents.news_classifier import NewsClassifierAgent
 from app.agents.news_collector import NewsCollectorAgent
 from app.agents.news_editor import NewsEditorAgent
+from app.agents.newsletter_overview import NewsletterOverviewAgent
 
 __all__ = [
     "DiscordPublisherAgent",
@@ -15,4 +16,5 @@ __all__ = [
     "NewsClassifierAgent",
     "NewsCollectorAgent",
     "NewsEditorAgent",
+    "NewsletterOverviewAgent",
 ]

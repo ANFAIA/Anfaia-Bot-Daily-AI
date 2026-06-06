@@ -32,6 +32,14 @@ class WorkflowEngine(StrEnum):
     DEEPAGENTS = "deepagents"  # deliberative editorial brain (deepagents)
 
 
+def _validate_hhmm(value: str) -> str:
+    """Validate a 24h HH:MM time string."""
+    hh, _, mm = value.partition(":")
+    if not (hh.isdigit() and mm.isdigit() and 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
+        raise ValueError("La hora debe tener formato HH:MM (24h)")
+    return value
+
+
 class Settings(BaseSettings):
     """Typed and validated system configuration."""
 
@@ -76,11 +84,34 @@ class Settings(BaseSettings):
     # --- Discord ---
     discord_token: str | None = None
     discord_channel_id: int | None = None
+    # Optional separate channel for the weekly newsletter announcement.
+    # Falls back to discord_channel_id when unset.
+    newsletter_discord_channel_id: int | None = None
 
     # --- Scheduler ---
     scheduler_enabled: bool = True
     post_time: str = "09:00"
     timezone: str = "Europe/Madrid"
+
+    # --- Weekly newsletter ---
+    newsletter_enabled: bool = False
+    # Soft cap on stories; it only grows to fit the "one per category" floor.
+    newsletter_top_n: int = 6
+    newsletter_min_relevance: int = 50
+    # Extra stories beyond the per-category floor must score at least this.
+    newsletter_extra_relevance: int = 80
+    newsletter_dedup_threshold: float = 0.86
+    newsletter_post_time: str = "09:00"
+    newsletter_day_of_week: str = "mon"
+    newsletter_base_url: str | None = None
+    newsletter_path_prefix: str = "newsletters"
+    newsletter_logo_url: str = "https://anfaia.org/ANFAIA_logo_web.png"
+
+    # --- GitHub Pages (newsletter hosting) ---
+    github_token: str | None = None
+    github_owner: str | None = None
+    github_repo: str | None = None
+    github_branch: str = "gh-pages"
 
     # --- Orchestration ---
     # `sequential` (default) keeps the deterministic single-shot pipeline.
@@ -103,6 +134,11 @@ class Settings(BaseSettings):
         "openrouter_api_key",
         "discord_token",
         "discord_channel_id",
+        "newsletter_discord_channel_id",
+        "github_token",
+        "github_owner",
+        "github_repo",
+        "newsletter_base_url",
         mode="before",
     )
     @classmethod
@@ -122,13 +158,10 @@ class Settings(BaseSettings):
             )
         return self
 
-    @field_validator("post_time")
+    @field_validator("post_time", "newsletter_post_time")
     @classmethod
-    def _validate_post_time(cls, value: str) -> str:
-        hh, _, mm = value.partition(":")
-        if not (hh.isdigit() and mm.isdigit() and 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
-            raise ValueError("POST_TIME debe tener formato HH:MM (24h)")
-        return value
+    def _validate_times(cls, value: str) -> str:
+        return _validate_hhmm(value)
 
     @property
     def post_hour(self) -> int:
@@ -137,6 +170,14 @@ class Settings(BaseSettings):
     @property
     def post_minute(self) -> int:
         return int(self.post_time.split(":")[1])
+
+    @property
+    def newsletter_post_hour(self) -> int:
+        return int(self.newsletter_post_time.split(":")[0])
+
+    @property
+    def newsletter_post_minute(self) -> int:
+        return int(self.newsletter_post_time.split(":")[1])
 
     @property
     def active_llm_api_key(self) -> str | None:

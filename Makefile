@@ -13,8 +13,8 @@ BASE_URL ?= http://localhost:8000
 MSG ?= Mensaje de prueba de Anfaia Daily AI 🤖
 
 .PHONY: help venv install lint format format-check typecheck test test-fast cov \
-        run publish discord-test discord-diagnose migrate downgrade revision \
-        db-up db-down up down build logs ps shell clean
+        run publish newsletter newsletter-api discord-test discord-diagnose \
+        migrate downgrade revision db-up db-down up down build logs ps shell clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -66,6 +66,12 @@ run: ## Start the API locally with autoreload
 
 publish: ## Run the full workflow and publish a news item (POST /workflow/run)
 	curl -fsS -X POST $(BASE_URL)/workflow/run | $(PYTHON) -m json.tool
+
+newsletter: ## Build & publish the weekly newsletter once (standalone, no API server)
+	$(PYTHON) scripts/run_newsletter.py
+
+newsletter-api: ## Trigger the weekly newsletter via the running API (POST /newsletter/run)
+	curl -fsS -X POST $(BASE_URL)/newsletter/run | $(PYTHON) -m json.tool
 
 discord-test: ## Publish a test message to Discord (usage: make discord-test MSG="...")
 	curl -fsS -X POST $(BASE_URL)/discord/test \

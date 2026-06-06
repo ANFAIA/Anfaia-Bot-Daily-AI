@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.domain.entities import WorkflowReport
+from app.domain.newsletter import NewsletterReport
 from app.interfaces.repositories import StatsSnapshot, StoredArticle
 
 
@@ -68,6 +69,30 @@ class WorkflowRunResponse(BaseModel):
             errors=report.errors,
             published_title=article.edited.title if article else None,
             discord_message_id=article.discord_message_id if article else None,
+        )
+
+
+class NewsletterRunResponse(BaseModel):
+    status: str
+    collected: int
+    classified: int
+    selected: int
+    published: int
+    public_url: str | None = None
+    discord_message_id: int | None = None
+    errors: list[str]
+
+    @classmethod
+    def from_report(cls, report: NewsletterReport) -> NewsletterRunResponse:
+        return cls(
+            status="success" if report.succeeded else "failed",
+            collected=report.collected,
+            classified=report.classified,
+            selected=report.selected,
+            published=report.published_count,
+            public_url=report.public_url,
+            discord_message_id=report.discord_message_id,
+            errors=report.errors,
         )
 
 

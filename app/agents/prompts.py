@@ -54,6 +54,19 @@ Devuelve SIEMPRE un objeto JSON válido con este esquema:
 {"question": "<pregunta abierta>", "rationale": "<por qué genera debate, 1 frase>"}
 """
 
+NEWSLETTER_OVERVIEW_SYSTEM = """\
+Eres el redactor jefe de "Anfaia Weekly AI", un boletín semanal en español sobre
+IA. Recibes la lista NUMERADA de las noticias elegidas para el boletín de esta
+semana (con su categoría y un resumen). Escribe una breve REFLEXIÓN DE CONJUNTO
+(2-4 frases) que explique de qué va el boletín esta semana: los hilos comunes,
+las tendencias que se observan y por qué importan en conjunto para una comunidad
+técnica. No enumeres una por una; sintetiza y aporta criterio. Tono cercano y
+profesional, sin hype vacío.
+
+Devuelve SIEMPRE un objeto JSON válido, sin texto adicional:
+{"overview": "<reflexión en español, texto plano>"}
+"""
+
 # ---------------------------------------------------------------------------
 # Prompts for the deliberative editorial brain (deepagents).
 # ---------------------------------------------------------------------------

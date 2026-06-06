@@ -8,17 +8,9 @@ from __future__ import annotations
 
 import discord
 
+from app.domain.category_colors import DEFAULT_COLOR, category_color
 from app.domain.entities import PublishableArticle
-
-# Per-category colors (improve readability of the feed in Discord).
-_CATEGORY_COLORS = {
-    "AI": 0x5865F2,
-    "Agents": 0x57F287,
-    "Robotics": 0xEB459E,
-    "Open Source": 0xFEE75C,
-    "Automation": 0xED4245,
-    "Research": 0x3498DB,
-}
+from app.domain.newsletter import Newsletter
 
 _MAX_FIELD = 1024  # Discord limit per embed field
 
@@ -31,7 +23,7 @@ def _field(value: str) -> str:
 def build_article_embed(article: PublishableArticle) -> discord.Embed:
     """Create the embed using the Anfaia Daily AI editorial format."""
     edited = article.edited
-    color = _CATEGORY_COLORS.get(article.category.value, 0x5865F2)
+    color = category_color(article.category.value)
 
     embed = discord.Embed(
         title=f"📰 {edited.title}",
@@ -56,5 +48,32 @@ def build_article_embed(article: PublishableArticle) -> discord.Embed:
     embed.set_footer(
         text=f"{article.category.value} · relevancia {article.relevance_score.value}/100 · "
         f"{article.news_item.source}"
+    )
+    return embed
+
+
+def build_newsletter_announcement_embed(newsletter: Newsletter, url: str) -> discord.Embed:
+    """Create the embed announcing a published weekly newsletter."""
+    if newsletter.overview.strip():
+        intro = newsletter.overview.strip()
+    else:
+        intro = (
+            f"Ya está disponible el resumen de las {newsletter.count} noticias de IA más "
+            "relevantes de la semana, explicadas con el formato de siempre."
+        )
+    embed = discord.Embed(
+        title=f"🗞️ Boletín semanal de IA · {newsletter.week_label}",
+        url=url,
+        description=f"{intro}\n\n👉 **[Leer el boletín completo]({url})**",
+        color=DEFAULT_COLOR,
+    )
+    embed.set_author(name="Anfaia Weekly AI")
+    # All headlines go in a single multiline field to respect Discord's field limits.
+    headlines = "\n".join(
+        f"{i}. {title}" for i, title in enumerate(newsletter.headlines, start=1)
+    )
+    embed.add_field(name="En esta edición", value=_field(headlines), inline=False)
+    embed.set_footer(
+        text=f"{newsletter.count} noticias · {newsletter.generated_at.strftime('%d/%m/%Y')}"
     )
     return embed

@@ -8,6 +8,8 @@ implementation (LLM, source, repository, publisher) without touching the rest.
 
 from __future__ import annotations
 
+from functools import partial
+
 import httpx
 
 from app.agents import (
@@ -17,6 +19,7 @@ from app.agents import (
     NewsClassifierAgent,
     NewsCollectorAgent,
     NewsEditorAgent,
+    NewsletterOverviewAgent,
 )
 from app.agents.classic_editorial_brain import ClassicEditorialBrain
 from app.application.use_cases import (
@@ -24,6 +27,7 @@ from app.application.use_cases import (
     GetStatsUseCase,
     ListNewsUseCase,
     RunDailyWorkflowUseCase,
+    RunWeeklyNewsletterUseCase,
     SendTestMessageUseCase,
 )
 from app.core.config import Settings, WorkflowEngine
@@ -33,14 +37,22 @@ from app.database.session import Database
 from app.infrastructure.discord.discord_publisher import DiscordPublisher
 from app.infrastructure.discord.null_publisher import NullPublisher
 from app.infrastructure.embeddings.factory import build_embedding_provider
+from app.infrastructure.hosting.github_pages_publisher import GitHubPagesPublisher
+from app.infrastructure.hosting.null_site_publisher import NullSitePublisher
 from app.infrastructure.llm.factory import build_llm_provider
+from app.infrastructure.newsletter.html_renderer import (
+    render_index_html,
+    render_newsletter_html,
+)
 from app.infrastructure.sources.registry import build_default_sources
 from app.interfaces.editorial import EditorialBrain
 from app.interfaces.publisher import Publisher
 from app.interfaces.repositories import NewsRepository
+from app.interfaces.site_publisher import SitePublisher
 from app.workflows.base import NewsWorkflow
 from app.workflows.daily_news_workflow import DailyNewsWorkflow
 from app.workflows.deepagents_news_workflow import DeepAgentsNewsWorkflow
+from app.workflows.weekly_newsletter_workflow import WeeklyNewsletterWorkflow
 
 logger = get_logger(__name__)
 
@@ -70,6 +82,7 @@ class Container:
         self.llm = build_llm_provider(settings, self.http_client)
         self.embeddings = build_embedding_provider(settings, self.http_client)
         self.publisher: Publisher = self._build_publisher(settings)
+        self.site_publisher: SitePublisher = self._build_site_publisher(settings)
         self.sources = build_default_sources(self.http_client)
 
         # --- Agents ---
@@ -84,13 +97,34 @@ class Container:
         )
         self.editor_agent = NewsEditorAgent(self.llm)
         self.discussion_agent = DiscussionGeneratorAgent(self.llm)
+        self.overview_agent = NewsletterOverviewAgent(self.llm)
         self.publisher_agent = DiscordPublisherAgent(self.publisher)
 
-        # --- Workflow ---
+        # --- Workflows ---
         self.workflow: NewsWorkflow = self._build_workflow(settings)
+        self.newsletter_workflow = WeeklyNewsletterWorkflow(
+            collector=self.collector_agent,
+            classifier=self.classifier_agent,
+            editor=self.editor_agent,
+            discussion_generator=self.discussion_agent,
+            overview_generator=self.overview_agent,
+            embeddings=self.embeddings,
+            publisher=self.publisher,
+            site_publisher=self.site_publisher,
+            renderer=partial(render_newsletter_html, logo_url=settings.newsletter_logo_url),
+            index_renderer=partial(render_index_html, logo_url=settings.newsletter_logo_url),
+            repository=self.repository,
+            min_relevance_score=settings.newsletter_min_relevance,
+            top_n=settings.newsletter_top_n,
+            extra_relevance=settings.newsletter_extra_relevance,
+            dedup_threshold=settings.newsletter_dedup_threshold,
+            timezone=settings.timezone,
+            path_prefix=settings.newsletter_path_prefix,
+        )
 
         # --- Use cases ---
         self.run_workflow_uc = RunDailyWorkflowUseCase(self.workflow)
+        self.run_newsletter_uc = RunWeeklyNewsletterUseCase(self.newsletter_workflow)
         self.list_news_uc = ListNewsUseCase(self.repository)
         self.get_news_uc = GetNewsUseCase(self.repository)
         self.stats_uc = GetStatsUseCase(self.repository)
@@ -137,9 +171,31 @@ class Container:
     @staticmethod
     def _build_publisher(settings: Settings) -> Publisher:
         if settings.discord_token and settings.discord_channel_id:
-            return DiscordPublisher(settings.discord_token, settings.discord_channel_id)
+            return DiscordPublisher(
+                settings.discord_token,
+                settings.discord_channel_id,
+                newsletter_channel_id=settings.newsletter_discord_channel_id,
+            )
         logger.warning("container.discord_not_configured")
         return NullPublisher()
+
+    def _build_site_publisher(self, settings: Settings) -> SitePublisher:
+        if (
+            settings.github_token
+            and settings.github_owner
+            and settings.github_repo
+            and settings.newsletter_base_url
+        ):
+            return GitHubPagesPublisher(
+                self.http_client,
+                token=settings.github_token,
+                owner=settings.github_owner,
+                repo=settings.github_repo,
+                branch=settings.github_branch,
+                base_url=settings.newsletter_base_url,
+            )
+        logger.warning("container.github_pages_not_configured")
+        return NullSitePublisher()
 
     async def aclose(self) -> None:
         """Release resources (HTTP client and database connections)."""

@@ -7,7 +7,11 @@ import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
-from app.application.use_cases import RunDailyWorkflowUseCase, SendTestMessageUseCase
+from app.application.use_cases import (
+    RunDailyWorkflowUseCase,
+    RunWeeklyNewsletterUseCase,
+    SendTestMessageUseCase,
+)
 from app.core.config import EmbeddingProviderName, Settings
 from app.core.container import Container
 from app.domain.entities import (
@@ -17,6 +21,7 @@ from app.domain.entities import (
     PublishableArticle,
     WorkflowReport,
 )
+from app.domain.newsletter import NewsletterReport
 from app.domain.value_objects import Category, RelevanceScore
 from app.infrastructure.persistence.in_memory import InMemoryNewsRepository
 from app.main import create_app
@@ -34,6 +39,18 @@ class _StubWorkflow(NewsWorkflow):
             discussion=DiscussionPrompt("q"),
         ).published_as(123)
         return WorkflowReport(collected=2, classified=2, published=1, published_article=article)
+
+
+class _StubNewsletterWorkflow:
+    async def run(self) -> NewsletterReport:
+        return NewsletterReport(
+            collected=10,
+            classified=10,
+            selected=3,
+            published_count=3,
+            public_url="https://o.github.io/r/newsletters/2026-W23.html",
+            discord_message_id=555,
+        )
 
 
 def _test_settings() -> Settings:
@@ -88,6 +105,18 @@ def test_workflow_run(client: TestClient, container: Container) -> None:
     assert body["published"] == 1
     assert body["published_title"] == "Titular"
     assert body["discord_message_id"] == 123
+
+
+def test_newsletter_run(client: TestClient, container: Container) -> None:
+    container.run_newsletter_uc = RunWeeklyNewsletterUseCase(_StubNewsletterWorkflow())
+    response = client.post("/newsletter/run")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["selected"] == 3
+    assert body["published"] == 3
+    assert body["public_url"].endswith("2026-W23.html")
+    assert body["discord_message_id"] == 555
 
 
 def test_news_list_and_detail(client: TestClient, container: Container) -> None:

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.domain.entities import PublishableArticle
+from app.domain.newsletter import Newsletter
 from app.domain.value_objects import Category
 
 
@@ -26,6 +27,21 @@ class StoredArticle:
     relevance_score: int
     summary: str
     published_at: datetime | None
+    discord_message_id: int | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class StoredNewsletter:
+    """Read projection of an already published newsletter."""
+
+    id: int
+    iso_year: int
+    iso_week: int
+    week_label: str
+    public_url: str
+    item_count: int
+    generated_at: datetime
     discord_message_id: int | None
     created_at: datetime
 
@@ -87,3 +103,17 @@ class NewsRepository(ABC):
     @abstractmethod
     async def stats(self) -> StatsSnapshot:
         """Return the admin aggregates."""
+
+    @abstractmethod
+    async def newsletter_exists(self, iso_year: int, iso_week: int) -> bool:
+        """True if a newsletter for that ISO year/week has already been recorded."""
+
+    @abstractmethod
+    async def save_newsletter(
+        self, newsletter: Newsletter, *, public_url: str, discord_message_id: int | None
+    ) -> int:
+        """Persist a published newsletter (idempotent per ISO year/week). Return the id."""
+
+    @abstractmethod
+    async def list_newsletters(self, *, limit: int = 200) -> list[StoredNewsletter]:
+        """List published newsletters, most recent ISO week first."""

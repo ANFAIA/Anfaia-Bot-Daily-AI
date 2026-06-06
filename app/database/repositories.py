@@ -9,15 +9,17 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.database.models import NewsArticle, NewsEmbedding, WorkflowCounter
+from app.database.models import NewsArticle, NewsEmbedding, Newsletter, WorkflowCounter
 from app.database.session import Database
 from app.domain.entities import PublishableArticle
+from app.domain.newsletter import Newsletter as NewsletterEntity
 from app.domain.value_objects import Category
 from app.interfaces.repositories import (
     NewsRepository,
     SimilarArticle,
     StatsSnapshot,
     StoredArticle,
+    StoredNewsletter,
 )
 
 COUNTER_ANALYZED = "analyzed"
@@ -134,6 +136,65 @@ class SqlAlchemyNewsRepository(NewsRepository):
             last_run_at=None,
             last_run_status=None,
         )
+
+    async def newsletter_exists(self, iso_year: int, iso_week: int) -> bool:
+        async with self._db.session() as session:
+            stmt = select(Newsletter.id).where(
+                Newsletter.iso_year == iso_year, Newsletter.iso_week == iso_week
+            )
+            return (await session.execute(stmt)).first() is not None
+
+    async def save_newsletter(
+        self, newsletter: NewsletterEntity, *, public_url: str, discord_message_id: int | None
+    ) -> int:
+        async with self._db.session() as session:
+            stmt = (
+                pg_insert(Newsletter)
+                .values(
+                    iso_year=newsletter.iso_year,
+                    iso_week=newsletter.iso_week,
+                    week_label=newsletter.week_label,
+                    public_url=public_url,
+                    item_count=newsletter.count,
+                    generated_at=newsletter.generated_at,
+                    discord_message_id=discord_message_id,
+                )
+                .on_conflict_do_update(
+                    constraint="uq_newsletter_year_week",
+                    set_={
+                        "week_label": newsletter.week_label,
+                        "public_url": public_url,
+                        "item_count": newsletter.count,
+                        "generated_at": newsletter.generated_at,
+                        "discord_message_id": discord_message_id,
+                    },
+                )
+                .returning(Newsletter.id)
+            )
+            return (await session.execute(stmt)).scalar_one()
+
+    async def list_newsletters(self, *, limit: int = 200) -> list[StoredNewsletter]:
+        async with self._db.session() as session:
+            stmt = (
+                select(Newsletter)
+                .order_by(Newsletter.iso_year.desc(), Newsletter.iso_week.desc())
+                .limit(limit)
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+        return [
+            StoredNewsletter(
+                id=row.id,
+                iso_year=row.iso_year,
+                iso_week=row.iso_week,
+                week_label=row.week_label,
+                public_url=row.public_url,
+                item_count=row.item_count,
+                generated_at=row.generated_at,
+                discord_message_id=row.discord_message_id,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _to_stored(row: NewsArticle) -> StoredArticle:

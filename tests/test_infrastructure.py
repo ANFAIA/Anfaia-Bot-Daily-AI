@@ -14,8 +14,12 @@ from app.domain.entities import (
     NewsItem,
     PublishableArticle,
 )
+from app.domain.newsletter import Newsletter, NewsletterEntry
 from app.domain.value_objects import Category, RelevanceScore
-from app.infrastructure.discord.embed_builder import build_article_embed
+from app.infrastructure.discord.embed_builder import (
+    build_article_embed,
+    build_newsletter_announcement_embed,
+)
 from app.infrastructure.discord.null_publisher import NullPublisher
 from app.infrastructure.embeddings.hash_embeddings import HashEmbeddingProvider
 from app.infrastructure.persistence.in_memory import InMemoryNewsRepository, cosine_similarity
@@ -124,6 +128,37 @@ def test_build_article_embed_truncates_long_fields() -> None:
     embed = build_article_embed(article)
     what = next(f for f in embed.fields if f.name == "🔍 Qué ha pasado")
     assert len(what.value) <= 1024
+
+
+def _newsletter(n: int = 2) -> Newsletter:
+    entry = NewsletterEntry(
+        news_item=_article().news_item,
+        edited=_article().edited,
+        discussion=DiscussionPrompt("¿pregunta?"),
+    )
+    return Newsletter(
+        week_label="Semana del 1 al 7 de junio de 2026",
+        iso_year=2026,
+        iso_week=23,
+        generated_at=datetime(2026, 6, 6, 9, 0, tzinfo=UTC),
+        entries=tuple(entry for _ in range(n)),
+    )
+
+
+def test_build_newsletter_announcement_embed() -> None:
+    url = "https://o.github.io/r/newsletters/2026-W23.html"
+    embed = build_newsletter_announcement_embed(_newsletter(2), url)
+    assert embed.url == url
+    assert "Semana del 1 al 7 de junio de 2026" in embed.title
+    # All headlines collapsed into a single field.
+    field = next(f for f in embed.fields if f.name == "En esta edición")
+    assert "1." in field.value and "2." in field.value
+
+
+def test_build_newsletter_announcement_truncates_headlines() -> None:
+    embed = build_newsletter_announcement_embed(_newsletter(40), "https://e.com/x")
+    field = next(f for f in embed.fields if f.name == "En esta edición")
+    assert len(field.value) <= 1024
 
 
 # --- null publisher ---

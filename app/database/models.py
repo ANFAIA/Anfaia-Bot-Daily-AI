@@ -77,6 +77,28 @@ class NewsEmbedding(Base):
     article: Mapped[NewsArticle] = relationship(back_populates="embedding")
 
 
+class Newsletter(Base):
+    """A weekly newsletter that has been published to GitHub Pages."""
+
+    __tablename__ = "newsletters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    iso_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    iso_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    week_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    public_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    discord_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("iso_year", "iso_week", name="uq_newsletter_year_week"),
+    )
+
+
 class WorkflowCounter(Base):
     """Persistent aggregate counter for the administration statistics."""
 

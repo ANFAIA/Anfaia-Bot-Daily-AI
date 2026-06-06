@@ -11,11 +11,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import __version__
-from app.api.routes import discord, health, news, stats, workflow
+from app.api.routes import discord, health, news, newsletter, stats, workflow
 from app.core.config import Settings, get_settings
 from app.core.container import Container
 from app.core.logging import configure_logging, get_logger
-from app.infrastructure.scheduler.scheduler import DailyScheduler
+from app.infrastructure.scheduler.scheduler import DailyScheduler, WeeklyScheduler
 
 logger = get_logger(__name__)
 
@@ -43,10 +43,15 @@ def create_app(settings: Settings | None = None, *, container: Container | None 
         scheduler.start()
         app.state.scheduler = scheduler
 
+        weekly_scheduler = WeeklyScheduler(settings, active_container.run_newsletter_uc)
+        weekly_scheduler.start()
+        app.state.weekly_scheduler = weekly_scheduler
+
         try:
             yield
         finally:
             scheduler.shutdown()
+            weekly_scheduler.shutdown()
             if owns_container:
                 await active_container.aclose()
             logger.info("app.stopped")
@@ -64,6 +69,7 @@ def create_app(settings: Settings | None = None, *, container: Container | None 
     app.include_router(health.router)
     app.include_router(news.router)
     app.include_router(workflow.router)
+    app.include_router(newsletter.router)
     app.include_router(discord.router)
     app.include_router(stats.router)
     return app

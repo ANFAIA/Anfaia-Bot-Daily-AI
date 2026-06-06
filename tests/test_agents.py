@@ -7,9 +7,46 @@ from app.agents.duplicate_detector import DuplicateDetectorAgent
 from app.agents.news_classifier import NewsClassifierAgent
 from app.agents.news_collector import NewsCollectorAgent
 from app.agents.news_editor import NewsEditorAgent
-from app.domain.entities import EditedArticle, NewsItem
+from app.agents.newsletter_overview import NewsletterOverviewAgent
+from app.domain.entities import DiscussionPrompt, EditedArticle, NewsItem
+from app.domain.newsletter import NewsletterEntry
 from app.domain.value_objects import Category, RelevanceScore
-from tests.conftest import BrokenLLM, FakeSource
+from app.interfaces.llm import ChatMessage, LLMProvider
+from tests.conftest import BrokenLLM, FakeLLM, FakeSource
+
+
+def _overview_entry(title: str = "Titular") -> NewsletterEntry:
+    item = NewsItem(title=title, url="https://e.com/x", source="s", summary="r")
+    classified = item.with_classification(Category.AGENTS, RelevanceScore(88))
+    edited = EditedArticle(title, "qué", "por qué", "uso", "límites", "https://e.com/x")
+    return NewsletterEntry(news_item=classified, edited=edited, discussion=DiscussionPrompt("q"))
+
+
+class _EmptyOverviewLLM(LLMProvider):
+    async def complete(self, messages, *, temperature=0.4, max_tokens=1024) -> str:
+        return "{}"
+
+    async def complete_json(
+        self, messages: list[ChatMessage], *, temperature=0.2, max_tokens=1024
+    ) -> str:
+        return '{"overview": ""}'
+
+
+async def test_overview_agent_uses_llm() -> None:
+    text = await NewsletterOverviewAgent(FakeLLM()).run([_overview_entry()])
+    assert "agentes" in text.lower()
+
+
+async def test_overview_agent_fallback_on_empty() -> None:
+    text = await NewsletterOverviewAgent(_EmptyOverviewLLM()).run(
+        [_overview_entry("A"), _overview_entry("B")]
+    )
+    assert "2 noticias" in text  # fallback mentions the count
+
+
+async def test_overview_agent_fallback_on_error() -> None:
+    text = await NewsletterOverviewAgent(BrokenLLM()).run([_overview_entry()])
+    assert text  # non-empty fallback
 
 
 async def test_collector_aggregates_and_dedupes(news_item: NewsItem) -> None:

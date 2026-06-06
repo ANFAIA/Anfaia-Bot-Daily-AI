@@ -10,10 +10,12 @@ from __future__ import annotations
 from app.core.logging import get_logger
 from app.core.metrics import metrics
 from app.domain.entities import WorkflowReport
+from app.domain.newsletter import NewsletterReport
 from app.domain.value_objects import Category
 from app.interfaces.publisher import Publisher
 from app.interfaces.repositories import NewsRepository, StatsSnapshot, StoredArticle
 from app.workflows.base import NewsWorkflow
+from app.workflows.weekly_newsletter_workflow import WeeklyNewsletterWorkflow
 
 logger = get_logger(__name__)
 
@@ -26,6 +28,17 @@ class RunDailyWorkflowUseCase:
 
     async def execute(self) -> WorkflowReport:
         logger.info("usecase.run_workflow.start")
+        return await self._workflow.run()
+
+
+class RunWeeklyNewsletterUseCase:
+    """Runs the weekly newsletter workflow."""
+
+    def __init__(self, workflow: WeeklyNewsletterWorkflow) -> None:
+        self._workflow = workflow
+
+    async def execute(self) -> NewsletterReport:
+        logger.info("usecase.run_newsletter.start")
         return await self._workflow.run()
 
 

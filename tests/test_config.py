@@ -49,6 +49,22 @@ def test_empty_strings_become_none() -> None:
     assert s.openai_api_key is None
 
 
+def test_newsletter_post_time_parsing_and_validation() -> None:
+    s = _settings(newsletter_post_time="10:15")
+    assert s.newsletter_post_hour == 10
+    assert s.newsletter_post_minute == 15
+    with pytest.raises(ValidationError):
+        _settings(newsletter_post_time="99:99")
+
+
+def test_github_settings_empty_to_none() -> None:
+    s = _settings(github_token="", github_owner="", github_repo="", newsletter_base_url="")
+    assert s.github_token is None
+    assert s.github_owner is None
+    assert s.github_repo is None
+    assert s.newsletter_base_url is None
+
+
 def test_active_llm_api_key_selection() -> None:
     s = _settings(
         llm_provider=LLMProviderName.ANTHROPIC,

@@ -14,12 +14,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from app.domain.entities import PublishableArticle
+from app.domain.newsletter import Newsletter
 from app.domain.value_objects import Category
 from app.interfaces.repositories import (
     NewsRepository,
     SimilarArticle,
     StatsSnapshot,
     StoredArticle,
+    StoredNewsletter,
 )
 
 
@@ -49,6 +51,8 @@ class InMemoryNewsRepository(NewsRepository):
         self._records: list[_Record] = []
         self._counters: dict[str, int] = {}
         self._next_id = 1
+        self._newsletters: dict[tuple[int, int], StoredNewsletter] = {}
+        self._next_newsletter_id = 1
 
     async def url_exists(self, url_fingerprint: str) -> bool:
         return any(r.fingerprint == url_fingerprint for r in self._records)
@@ -106,6 +110,38 @@ class InMemoryNewsRepository(NewsRepository):
 
     async def get_article(self, article_id: int) -> StoredArticle | None:
         return next((r.stored for r in self._records if r.stored.id == article_id), None)
+
+    async def newsletter_exists(self, iso_year: int, iso_week: int) -> bool:
+        return (iso_year, iso_week) in self._newsletters
+
+    async def save_newsletter(
+        self, newsletter: Newsletter, *, public_url: str, discord_message_id: int | None
+    ) -> int:
+        key = (newsletter.iso_year, newsletter.iso_week)
+        existing = self._newsletters.get(key)
+        newsletter_id = existing.id if existing else self._next_newsletter_id
+        if existing is None:
+            self._next_newsletter_id += 1
+        self._newsletters[key] = StoredNewsletter(
+            id=newsletter_id,
+            iso_year=newsletter.iso_year,
+            iso_week=newsletter.iso_week,
+            week_label=newsletter.week_label,
+            public_url=public_url,
+            item_count=newsletter.count,
+            generated_at=newsletter.generated_at,
+            discord_message_id=discord_message_id,
+            created_at=datetime.now(UTC),
+        )
+        return newsletter_id
+
+    async def list_newsletters(self, *, limit: int = 200) -> list[StoredNewsletter]:
+        items = sorted(
+            self._newsletters.values(),
+            key=lambda n: (n.iso_year, n.iso_week),
+            reverse=True,
+        )
+        return items[:limit]
 
     async def stats(self) -> StatsSnapshot:
         by_category: dict[str, int] = {}

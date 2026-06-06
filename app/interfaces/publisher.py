@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from app.domain.entities import PublishableArticle
+from app.domain.newsletter import Newsletter
 
 
 class PublisherError(RuntimeError):
@@ -25,3 +26,13 @@ class Publisher(ABC):
     @abstractmethod
     async def publish_test_message(self, text: str) -> int:
         """Publish a test message; return the message id."""
+
+    @abstractmethod
+    async def publish_newsletter_announcement(self, newsletter: Newsletter, url: str) -> int:
+        """Announce a published weekly newsletter (with its public URL).
+
+        Returns the id of the created message.
+
+        Raises:
+            PublisherError: if publishing fails permanently.
+        """
