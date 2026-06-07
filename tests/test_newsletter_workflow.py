@@ -206,9 +206,7 @@ async def test_newsletter_covers_each_category_plus_extras(
         assert f'class="badge">{category}<' in html
 
 
-async def test_newsletter_db_failure_still_announces(
-    fake_llm, embeddings, fake_publisher
-) -> None:
+async def test_newsletter_db_failure_still_announces(fake_llm, embeddings, fake_publisher) -> None:
     # The DB is down: the record/idempotency check fails, but the HTML is live
     # and the Discord announcement must still happen.
     from app.infrastructure.persistence.in_memory import InMemoryNewsRepository
@@ -308,9 +306,7 @@ async def test_newsletter_site_failure_skips_announcement(
     assert fake_publisher.announcements == []
 
 
-async def test_newsletter_discord_failure_is_non_fatal(
-    fake_llm, repository, embeddings
-) -> None:
+async def test_newsletter_discord_failure_is_non_fatal(fake_llm, repository, embeddings) -> None:
     # NullPublisher raises PublisherError on announce; the HTML is already live.
     workflow = _build(
         llm=fake_llm,

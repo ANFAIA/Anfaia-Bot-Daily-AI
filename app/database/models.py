@@ -94,9 +94,7 @@ class Newsletter(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    __table_args__ = (
-        UniqueConstraint("iso_year", "iso_week", name="uq_newsletter_year_week"),
-    )
+    __table_args__ = (UniqueConstraint("iso_year", "iso_week", name="uq_newsletter_year_week"),)
 
 
 class WorkflowCounter(Base):

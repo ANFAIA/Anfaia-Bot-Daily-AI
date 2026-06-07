@@ -73,7 +73,7 @@ def test_non_http_source_url_is_not_linked() -> None:
         _newsletter([_entry(title="X", source_url="javascript:alert(1)")])
     )
     assert "javascript:alert(1)" not in html
-    assert "href=\"javascript:" not in html
+    assert 'href="javascript:' not in html
 
 
 def test_newsletter_has_back_to_index_button() -> None:

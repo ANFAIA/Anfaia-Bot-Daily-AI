@@ -69,9 +69,7 @@ def build_newsletter_announcement_embed(newsletter: Newsletter, url: str) -> dis
     )
     embed.set_author(name="Anfaia Weekly AI")
     # All headlines go in a single multiline field to respect Discord's field limits.
-    headlines = "\n".join(
-        f"{i}. {title}" for i, title in enumerate(newsletter.headlines, start=1)
-    )
+    headlines = "\n".join(f"{i}. {title}" for i, title in enumerate(newsletter.headlines, start=1))
     embed.add_field(name="En esta edición", value=_field(headlines), inline=False)
     embed.set_footer(
         text=f"{newsletter.count} noticias · {newsletter.generated_at.strftime('%d/%m/%Y')}"

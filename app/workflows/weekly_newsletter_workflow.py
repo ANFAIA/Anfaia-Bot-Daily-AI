@@ -37,8 +37,18 @@ from app.interfaces.site_publisher import SitePublisher, SitePublisherError
 logger = get_logger(__name__)
 
 _MONTHS_ES = [
-    "enero", "febrero", "marzo", "abril", "mayo", "junio",
-    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
 ]
 
 
@@ -299,9 +309,7 @@ class WeeklyNewsletterWorkflow:
         discussion = await self._discussion_generator.run(DiscussionInput(item=item, edited=edited))
         return NewsletterEntry(news_item=item, edited=edited, discussion=discussion)
 
-    def _build_newsletter(
-        self, entries: tuple[NewsletterEntry, ...], overview: str
-    ) -> Newsletter:
+    def _build_newsletter(self, entries: tuple[NewsletterEntry, ...], overview: str) -> Newsletter:
         now = datetime.now(self._tz)
         iso = now.isocalendar()
         monday = date.fromisocalendar(iso.year, iso.week, 1)

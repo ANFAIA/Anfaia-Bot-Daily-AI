@@ -198,7 +198,7 @@ def _render_entry(entry: NewsletterEntry, index: int) -> str:
       {sections}
       <div class="section question">
         <h3>💬 Pregunta para la comunidad</h3>
-        <p>{escape(entry.discussion.question or '—')}</p>
+        <p>{escape(entry.discussion.question or "—")}</p>
       </div>
       <div class="card-foot">{source_html}</div>
     </article>"""
@@ -224,7 +224,7 @@ def render_newsletter_html(
         )
     intro = f'    <div class="intro">{intro_text}</div>'
     footer = _footer(
-        f'Generado el {generated} · '
+        f"Generado el {generated} · "
         f'<a href="{escape(_SITE_URL)}" target="_blank" rel="noopener">anfaia.org</a> · '
         f"Anfaia Weekly AI"
     )
