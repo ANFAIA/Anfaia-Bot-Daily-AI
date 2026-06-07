@@ -5,13 +5,17 @@ FROM python:3.12-slim AS base
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=Europe/Madrid
 
 WORKDIR /app
 
 # System dependencies required by asyncpg and occasional source builds.
+# tzdata + a symlinked /etc/localtime give the container the Europe/Madrid clock.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libpq-dev \
+    && apt-get install -y --no-install-recommends build-essential libpq-dev tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 # Pip extras to install (e.g. "deepagents" for WORKFLOW_ENGINE=deepagents).
