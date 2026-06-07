@@ -13,7 +13,7 @@ WORKDIR /app
 # System dependencies required by asyncpg and occasional source builds.
 # tzdata + a symlinked /etc/localtime give the container the Europe/Madrid clock.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libpq-dev tzdata \
+    && apt-get install -y --no-install-recommends build-essential libpq-dev tzdata curl \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
