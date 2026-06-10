@@ -70,29 +70,40 @@ class GitHubPagesPublisher(SitePublisher):
             f"GitHub respondió {response.status_code} al leer {path}: {response.text[:200]}"
         )
 
+    async def publish_html(self, *, path: str, html: str, commit_message: str) -> PublishedSite:
+        return await self.publish_bytes(
+            path=path,
+            content=html.encode("utf-8"),
+            content_type="text/html; charset=utf-8",
+            commit_message=commit_message,
+        )
+
     @retry(
         retry=retry_if_exception_type(httpx.HTTPError),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=2, max=20),
         reraise=True,
     )
-    async def publish_html(self, *, path: str, html: str, commit_message: str) -> PublishedSite:
+    async def publish_bytes(
+        self, *, path: str, content: bytes, content_type: str, commit_message: str
+    ) -> PublishedSite:
         path = path.lstrip("/")
         sha = await self._current_sha(path)
-        commit_sha = await self._put(path=path, html=html, message=commit_message, sha=sha)
+        commit_sha = await self._put(path=path, content=content, message=commit_message, sha=sha)
         public_url = f"{self._base_url}/{path}"
         logger.info(
             "site_publisher.published",
             path=path,
             url=public_url,
+            content_type=content_type,
             created=sha is None,
         )
         return PublishedSite(public_url=public_url, path=path, commit_sha=commit_sha)
 
-    async def _put(self, *, path: str, html: str, message: str, sha: str | None) -> str:
+    async def _put(self, *, path: str, content: bytes, message: str, sha: str | None) -> str:
         body: dict[str, str] = {
             "message": message,
-            "content": base64.b64encode(html.encode("utf-8")).decode("ascii"),
+            "content": base64.b64encode(content).decode("ascii"),
             "branch": self._branch,
         }
         if sha is not None:

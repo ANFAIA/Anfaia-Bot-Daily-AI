@@ -20,6 +20,7 @@ from app.agents import (
     NewsCollectorAgent,
     NewsEditorAgent,
     NewsletterOverviewAgent,
+    PodcastScriptwriterAgent,
 )
 from app.agents.classic_editorial_brain import ClassicEditorialBrain
 from app.application.use_cases import (
@@ -34,6 +35,7 @@ from app.core.config import Settings, WorkflowEngine
 from app.core.logging import get_logger
 from app.database.repositories import SqlAlchemyNewsRepository
 from app.database.session import Database
+from app.domain.podcast import SPEAKER_A, SPEAKER_B
 from app.infrastructure.discord.discord_publisher import DiscordPublisher
 from app.infrastructure.discord.null_publisher import NullPublisher
 from app.infrastructure.embeddings.factory import build_embedding_provider
@@ -44,14 +46,18 @@ from app.infrastructure.newsletter.html_renderer import (
     render_index_html,
     render_newsletter_html,
 )
+from app.infrastructure.podcast.rss_renderer import PodcastFeedMeta, render_podcast_rss
 from app.infrastructure.sources.registry import build_default_sources
+from app.infrastructure.tts.factory import build_tts_provider
 from app.interfaces.editorial import EditorialBrain
 from app.interfaces.publisher import Publisher
 from app.interfaces.repositories import NewsRepository
 from app.interfaces.site_publisher import SitePublisher
+from app.interfaces.tts import TextToSpeechProvider
 from app.workflows.base import NewsWorkflow
 from app.workflows.daily_news_workflow import DailyNewsWorkflow
 from app.workflows.deepagents_news_workflow import DeepAgentsNewsWorkflow
+from app.workflows.podcast_workflow import PodcastWorkflow
 from app.workflows.weekly_newsletter_workflow import WeeklyNewsletterWorkflow
 
 logger = get_logger(__name__)
@@ -83,6 +89,7 @@ class Container:
         self.embeddings = build_embedding_provider(settings, self.http_client)
         self.publisher: Publisher = self._build_publisher(settings)
         self.site_publisher: SitePublisher = self._build_site_publisher(settings)
+        self.tts: TextToSpeechProvider = build_tts_provider(settings, self.http_client)
         self.sources = build_default_sources(self.http_client)
 
         # --- Agents ---
@@ -98,10 +105,17 @@ class Container:
         self.editor_agent = NewsEditorAgent(self.llm)
         self.discussion_agent = DiscussionGeneratorAgent(self.llm)
         self.overview_agent = NewsletterOverviewAgent(self.llm)
+        self.scriptwriter_agent = PodcastScriptwriterAgent(
+            self.llm,
+            host_a=settings.podcast_voice_a_name,
+            host_b=settings.podcast_voice_b_name,
+            target_minutes=settings.podcast_target_minutes,
+        )
         self.publisher_agent = DiscordPublisherAgent(self.publisher)
 
         # --- Workflows ---
         self.workflow: NewsWorkflow = self._build_workflow(settings)
+        self.podcast_workflow = self._build_podcast_workflow(settings)
         self.newsletter_workflow = WeeklyNewsletterWorkflow(
             collector=self.collector_agent,
             classifier=self.classifier_agent,
@@ -120,6 +134,7 @@ class Container:
             dedup_threshold=settings.newsletter_dedup_threshold,
             timezone=settings.timezone,
             path_prefix=settings.newsletter_path_prefix,
+            podcast_workflow=self.podcast_workflow,
         )
 
         # --- Use cases ---
@@ -168,6 +183,41 @@ class Container:
             min_relevance_score=settings.min_relevance_score,
         )
 
+    def _build_podcast_workflow(self, settings: Settings) -> PodcastWorkflow | None:
+        """Build the podcast workflow when enabled, else None (boletín unaffected)."""
+        if not settings.podcast_enabled:
+            return None
+        voice_map = {
+            speaker: voice
+            for speaker, voice in (
+                (SPEAKER_A, settings.podcast_voice_a),
+                (SPEAKER_B, settings.podcast_voice_b),
+            )
+            if voice
+        }
+        base_url = (settings.newsletter_base_url or "https://anfaia.org").rstrip("/")
+        prefix = settings.podcast_path_prefix.strip("/")
+        feed_meta = PodcastFeedMeta(
+            title=settings.podcast_title,
+            description=settings.podcast_description,
+            author=settings.podcast_author,
+            language=settings.podcast_language,
+            site_url=base_url,
+            feed_url=f"{base_url}/{prefix}/feed.xml",
+            image_url=settings.newsletter_logo_url,
+            email=settings.podcast_email or "",
+        )
+        return PodcastWorkflow(
+            scriptwriter=self.scriptwriter_agent,
+            tts=self.tts,
+            site_publisher=self.site_publisher,
+            publisher=self.publisher,
+            feed_renderer=partial(render_podcast_rss, meta=feed_meta),
+            repository=self.repository,
+            voice_map=voice_map,
+            path_prefix=settings.podcast_path_prefix,
+        )
+
     @staticmethod
     def _build_publisher(settings: Settings) -> Publisher:
         if settings.discord_token and settings.discord_channel_id:
@@ -175,6 +225,7 @@ class Container:
                 settings.discord_token,
                 settings.discord_channel_id,
                 newsletter_channel_id=settings.newsletter_discord_channel_id,
+                podcast_channel_id=settings.podcast_discord_channel_id,
             )
         logger.warning("container.discord_not_configured")
         return NullPublisher()

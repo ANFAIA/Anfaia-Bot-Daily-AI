@@ -332,6 +332,87 @@ Con `NEWSLETTER_ENABLED=true`, además se publica **solo el día configurado**
 
 ---
 
+## 🎧 Podcast semanal
+
+Como extensión opcional del boletín, el sistema puede convertir las **mismas
+noticias seleccionadas** en un **podcast en español a dos voces** (estilo
+conversación, con humor), generar el audio con **ElevenLabs** o **Google Gemini**
+y publicarlo.
+
+### Flujo
+
+```
+Newsletter (noticias de la semana)
+   → Guion (agente guionista: diálogo de 2 locutores, fresco y con humor)
+   → Audio (TTS, una voz por locutor)
+   → Publicar episodio (GitHub Pages) → Registrar → Feed RSS (feed.xml)
+   → Reproductor embebido en el HTML del boletín → Anuncio en Discord
+```
+
+- Se genera **dentro del run semanal**, justo antes de renderizar el HTML, para
+  poder **embeber el reproductor** en la página del boletín.
+- **Best-effort**: si el podcast falla o está desactivado, el boletín se publica
+  exactamente igual que antes (sin reproductor).
+- **Salidas**: `<base>/podcast/AAAA-Wnn.{mp3,wav}` (episodio) y
+  `<base>/podcast/feed.xml` (feed RSS 2.0 + iTunes, apto para **Spotify**/
+  **Apple Podcasts**).
+
+### Elegir el motor de voz (`TTS_PROVIDER`)
+
+| | `elevenlabs` (por defecto) | `gemini` |
+|---|---|---|
+| Voz por turno | Sintetiza cada turno con su voz y concatena | **Multi-locutor en una pasada** (estilo NotebookLM) |
+| Formato | **MP3** (recomendado para el feed público) | **WAV** (mayor tamaño) |
+| Voces | `voice id` de la biblioteca de ElevenLabs | nombres predefinidos de Gemini (p. ej. `Kore`, `Puck`) |
+| Coste | Suscripción de ElevenLabs | Cuota de la API de Gemini |
+
+`PODCAST_VOICE_A`/`PODCAST_VOICE_B` se interpretan según el proveedor: como
+`voice id` con ElevenLabs y como **nombre de voz predefinida** con Gemini.
+
+### Configurarlo
+
+1. Elige el motor con `TTS_PROVIDER` y obtén su clave:
+   - **ElevenLabs**: `ELEVENLABS_API_KEY` + dos `voice id` de su biblioteca.
+   - **Gemini**: `GEMINI_API_KEY` + dos nombres de voz (`Kore`, `Puck`, …).
+2. Rellena en `.env` (sobre la config de GitHub Pages del boletín):
+
+```bash
+PODCAST_ENABLED=true
+
+# Opción A — ElevenLabs (MP3)
+TTS_PROVIDER=elevenlabs
+ELEVENLABS_API_KEY=...
+PODCAST_VOICE_A=<voice_id_locutor_A>
+PODCAST_VOICE_B=<voice_id_locutor_B>
+
+# Opción B — Gemini multi-locutor (WAV, estilo NotebookLM)
+# TTS_PROVIDER=gemini
+# GEMINI_API_KEY=...
+# PODCAST_VOICE_A=Kore
+# PODCAST_VOICE_B=Puck
+
+PODCAST_VOICE_A_NAME=Lucía
+PODCAST_VOICE_B_NAME=Mateo
+PODCAST_TARGET_MINUTES=8
+PODCAST_TITLE=Anfaia Weekly AI
+PODCAST_EMAIL=podcast@anfaia.org
+# Opcional: canal de Discord propio para el podcast
+PODCAST_DISCORD_CHANNEL_ID=
+```
+
+3. Da de alta el feed `https://<base>/podcast/feed.xml` en **Spotify for
+   Podcasters** y **Apple Podcasts Connect** (una sola vez; las nuevas ediciones
+   aparecen al regenerarse el feed cada semana).
+
+> Con ElevenLabs el audio se sintetiza turno a turno y se concatenan los MP3
+> (CBR). Con Gemini se usa la **TTS multi-locutor** (NotebookLM-style): el guion
+> va etiquetado por hablante y Gemini pone las dos voces en una sola pasada,
+> devolviendo PCM que se envuelve en WAV (sin dependencias de sistema añadidas).
+> En ambos casos la ejecución (API, `scripts/run_newsletter.py`, Docker o
+> scheduler) es la misma del boletín: el podcast se produce como parte de ese run.
+
+---
+
 ## 🛣️ Evolución futura
 
 El mismo contrato `NewsWorkflow` (`app/workflows/base.py`) y el puerto `Agent`

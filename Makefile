@@ -73,6 +73,12 @@ newsletter: ## Build & publish the weekly newsletter once (standalone, no API se
 newsletter-api: ## Trigger the weekly newsletter via the running API (POST /newsletter/run)
 	curl -fsS -X POST $(BASE_URL)/newsletter/run | $(PYTHON) -m json.tool
 
+test-podcast: ## Generate a podcast episode locally to ./out WITHOUT publishing anything
+	$(PYTHON) scripts/test_podcast.py
+
+test-podcast-script: ## Same as test-podcast but only the script (no TTS, no credits spent)
+	$(PYTHON) scripts/test_podcast.py --script-only
+
 discord-test: ## Publish a test message to Discord (usage: make discord-test MSG="...")
 	curl -fsS -X POST $(BASE_URL)/discord/test \
 		-H 'Content-Type: application/json' \

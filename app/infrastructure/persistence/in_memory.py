@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 
 from app.domain.entities import PublishableArticle
 from app.domain.newsletter import Newsletter
+from app.domain.podcast import PodcastEpisode
 from app.domain.value_objects import Category
 from app.interfaces.repositories import (
     NewsRepository,
@@ -22,6 +23,7 @@ from app.interfaces.repositories import (
     StatsSnapshot,
     StoredArticle,
     StoredNewsletter,
+    StoredPodcast,
 )
 
 
@@ -53,6 +55,8 @@ class InMemoryNewsRepository(NewsRepository):
         self._next_id = 1
         self._newsletters: dict[tuple[int, int], StoredNewsletter] = {}
         self._next_newsletter_id = 1
+        self._podcasts: dict[tuple[int, int], StoredPodcast] = {}
+        self._next_podcast_id = 1
 
     async def url_exists(self, url_fingerprint: str) -> bool:
         return any(r.fingerprint == url_fingerprint for r in self._records)
@@ -139,6 +143,40 @@ class InMemoryNewsRepository(NewsRepository):
         items = sorted(
             self._newsletters.values(),
             key=lambda n: (n.iso_year, n.iso_week),
+            reverse=True,
+        )
+        return items[:limit]
+
+    async def podcast_exists(self, iso_year: int, iso_week: int) -> bool:
+        return (iso_year, iso_week) in self._podcasts
+
+    async def save_podcast(self, episode: PodcastEpisode, *, discord_message_id: int | None) -> int:
+        key = (episode.iso_year, episode.iso_week)
+        existing = self._podcasts.get(key)
+        podcast_id = existing.id if existing else self._next_podcast_id
+        if existing is None:
+            self._next_podcast_id += 1
+        self._podcasts[key] = StoredPodcast(
+            id=podcast_id,
+            iso_year=episode.iso_year,
+            iso_week=episode.iso_week,
+            week_label=episode.week_label,
+            title=episode.title,
+            audio_url=episode.audio_url,
+            page_url=episode.page_url,
+            duration_seconds=episode.duration_seconds,
+            byte_size=episode.byte_size,
+            summary=episode.summary,
+            generated_at=episode.generated_at,
+            discord_message_id=discord_message_id,
+            created_at=datetime.now(UTC),
+        )
+        return podcast_id
+
+    async def list_podcasts(self, *, limit: int = 200) -> list[StoredPodcast]:
+        items = sorted(
+            self._podcasts.values(),
+            key=lambda p: (p.iso_year, p.iso_week),
             reverse=True,
         )
         return items[:limit]

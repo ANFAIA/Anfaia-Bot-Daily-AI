@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.core.logging import get_logger
 from app.domain.entities import PublishableArticle
 from app.domain.newsletter import Newsletter
+from app.domain.podcast import PodcastEpisode
 from app.interfaces.publisher import Publisher, PublisherError
 
 _NOT_CONFIGURED = "Discord no está configurado (define DISCORD_TOKEN y DISCORD_CHANNEL_ID)"
@@ -29,4 +30,8 @@ class NullPublisher(Publisher):
 
     async def publish_newsletter_announcement(self, newsletter: Newsletter, url: str) -> int:
         logger.error("publisher.not_configured", newsletter=newsletter.week_label)
+        raise PublisherError(_NOT_CONFIGURED)
+
+    async def publish_podcast_announcement(self, episode: PodcastEpisode, url: str) -> int:
+        logger.error("publisher.not_configured", podcast=episode.week_label)
         raise PublisherError(_NOT_CONFIGURED)

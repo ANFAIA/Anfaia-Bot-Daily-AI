@@ -72,6 +72,13 @@ _STYLES = """<style>
       padding:18px 22px; margin:-28px auto 28px; box-shadow:0 10px 30px rgba(30,58,138,.10);
       color:var(--gray-700); font-weight:500;
     }
+    .podcast {
+      background:linear-gradient(135deg, var(--blue-700) 0%, var(--indigo-600) 100%);
+      color:#fff; border-radius:16px; padding:18px 22px; margin:0 auto 28px;
+      box-shadow:0 10px 30px rgba(30,58,138,.16);
+    }
+    .podcast h2 { margin:0 0 10px; font-size:1.05rem; font-weight:700; }
+    .podcast audio { width:100%; }
     .card {
       background:#fff; border:1px solid var(--gray-200); border-left:5px solid var(--accent);
       border-radius:16px; padding:24px 26px; margin:0 0 22px;
@@ -209,8 +216,13 @@ def render_newsletter_html(
     *,
     logo_url: str = DEFAULT_LOGO_URL,
     index_href: str = DEFAULT_INDEX_HREF,
+    podcast_url: str | None = None,
 ) -> str:
-    """Render a weekly newsletter as a complete, self-contained HTML document."""
+    """Render a weekly newsletter as a complete, self-contained HTML document.
+
+    When ``podcast_url`` is a safe http(s) link to the week's episode, an audio
+    player is embedded just below the intro.
+    """
     cards = "".join(_render_entry(e, i) for i, e in enumerate(newsletter.entries, start=1))
     generated = escape(newsletter.generated_at.strftime("%d/%m/%Y %H:%M"))
     top_link = f'<a class="backlink" href="{escape(index_href)}">← Índice</a>'
@@ -223,6 +235,16 @@ def render_newsletter_html(
             "diaria de Anfaia."
         )
     intro = f'    <div class="intro">{intro_text}</div>'
+    podcast_link = _safe_link(podcast_url) if podcast_url else None
+    if podcast_link:
+        intro += (
+            '\n    <div class="podcast">'
+            "<h2>🎧 Escucha el podcast de la semana</h2>"
+            f'<audio controls preload="none" src="{escape(podcast_link)}">'
+            "Tu navegador no admite audio. "
+            f'<a href="{escape(podcast_link)}">Descarga el episodio</a>.'
+            "</audio></div>"
+        )
     footer = _footer(
         f"Generado el {generated} · "
         f'<a href="{escape(_SITE_URL)}" target="_blank" rel="noopener">anfaia.org</a> · '

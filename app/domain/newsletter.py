@@ -65,6 +65,7 @@ class NewsletterReport:
     published_count: int = 0
     public_url: str | None = None
     discord_message_id: int | None = None
+    podcast_url: str | None = None
     errors: list[str] = field(default_factory=list)
     started_at: datetime | None = None
     finished_at: datetime | None = None

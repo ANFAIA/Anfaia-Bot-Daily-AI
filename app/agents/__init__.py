@@ -7,6 +7,7 @@ from app.agents.news_classifier import NewsClassifierAgent
 from app.agents.news_collector import NewsCollectorAgent
 from app.agents.news_editor import NewsEditorAgent
 from app.agents.newsletter_overview import NewsletterOverviewAgent
+from app.agents.podcast_scriptwriter import PodcastScriptwriterAgent
 
 __all__ = [
     "DiscordPublisherAgent",
@@ -17,4 +18,5 @@ __all__ = [
     "NewsCollectorAgent",
     "NewsEditorAgent",
     "NewsletterOverviewAgent",
+    "PodcastScriptwriterAgent",
 ]

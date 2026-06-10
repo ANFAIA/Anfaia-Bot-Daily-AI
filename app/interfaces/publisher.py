@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 
 from app.domain.entities import PublishableArticle
 from app.domain.newsletter import Newsletter
+from app.domain.podcast import PodcastEpisode
 
 
 class PublisherError(RuntimeError):
@@ -30,6 +31,16 @@ class Publisher(ABC):
     @abstractmethod
     async def publish_newsletter_announcement(self, newsletter: Newsletter, url: str) -> int:
         """Announce a published weekly newsletter (with its public URL).
+
+        Returns the id of the created message.
+
+        Raises:
+            PublisherError: if publishing fails permanently.
+        """
+
+    @abstractmethod
+    async def publish_podcast_announcement(self, episode: PodcastEpisode, url: str) -> int:
+        """Announce a published weekly podcast episode (with its listen URL).
 
         Returns the id of the created message.
 

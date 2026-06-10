@@ -12,6 +12,7 @@ from datetime import datetime
 
 from app.domain.entities import PublishableArticle
 from app.domain.newsletter import Newsletter
+from app.domain.podcast import PodcastEpisode
 from app.domain.value_objects import Category
 
 
@@ -41,6 +42,25 @@ class StoredNewsletter:
     week_label: str
     public_url: str
     item_count: int
+    generated_at: datetime
+    discord_message_id: int | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class StoredPodcast:
+    """Read projection of an already published podcast episode."""
+
+    id: int
+    iso_year: int
+    iso_week: int
+    week_label: str
+    title: str
+    audio_url: str
+    page_url: str
+    duration_seconds: int
+    byte_size: int
+    summary: str
     generated_at: datetime
     discord_message_id: int | None
     created_at: datetime
@@ -117,3 +137,15 @@ class NewsRepository(ABC):
     @abstractmethod
     async def list_newsletters(self, *, limit: int = 200) -> list[StoredNewsletter]:
         """List published newsletters, most recent ISO week first."""
+
+    @abstractmethod
+    async def podcast_exists(self, iso_year: int, iso_week: int) -> bool:
+        """True if a podcast for that ISO year/week has already been recorded."""
+
+    @abstractmethod
+    async def save_podcast(self, episode: PodcastEpisode, *, discord_message_id: int | None) -> int:
+        """Persist a published podcast episode (idempotent per ISO year/week)."""
+
+    @abstractmethod
+    async def list_podcasts(self, *, limit: int = 200) -> list[StoredPodcast]:
+        """List published podcast episodes, most recent ISO week first."""

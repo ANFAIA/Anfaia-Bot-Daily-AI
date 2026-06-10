@@ -9,10 +9,17 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.database.models import NewsArticle, NewsEmbedding, Newsletter, WorkflowCounter
+from app.database.models import (
+    NewsArticle,
+    NewsEmbedding,
+    Newsletter,
+    Podcast,
+    WorkflowCounter,
+)
 from app.database.session import Database
 from app.domain.entities import PublishableArticle
 from app.domain.newsletter import Newsletter as NewsletterEntity
+from app.domain.podcast import PodcastEpisode
 from app.domain.value_objects import Category
 from app.interfaces.repositories import (
     NewsRepository,
@@ -20,6 +27,7 @@ from app.interfaces.repositories import (
     StatsSnapshot,
     StoredArticle,
     StoredNewsletter,
+    StoredPodcast,
 )
 
 COUNTER_ANALYZED = "analyzed"
@@ -189,6 +197,66 @@ class SqlAlchemyNewsRepository(NewsRepository):
                 week_label=row.week_label,
                 public_url=row.public_url,
                 item_count=row.item_count,
+                generated_at=row.generated_at,
+                discord_message_id=row.discord_message_id,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
+    async def podcast_exists(self, iso_year: int, iso_week: int) -> bool:
+        async with self._db.session() as session:
+            stmt = select(Podcast.id).where(
+                Podcast.iso_year == iso_year, Podcast.iso_week == iso_week
+            )
+            return (await session.execute(stmt)).first() is not None
+
+    async def save_podcast(self, episode: PodcastEpisode, *, discord_message_id: int | None) -> int:
+        values = {
+            "iso_year": episode.iso_year,
+            "iso_week": episode.iso_week,
+            "week_label": episode.week_label,
+            "title": episode.title,
+            "audio_url": episode.audio_url,
+            "page_url": episode.page_url,
+            "duration_seconds": episode.duration_seconds,
+            "byte_size": episode.byte_size,
+            "summary": episode.summary,
+            "generated_at": episode.generated_at,
+            "discord_message_id": discord_message_id,
+        }
+        async with self._db.session() as session:
+            stmt = (
+                pg_insert(Podcast)
+                .values(**values)
+                .on_conflict_do_update(
+                    constraint="uq_podcast_year_week",
+                    set_={k: v for k, v in values.items() if k not in ("iso_year", "iso_week")},
+                )
+                .returning(Podcast.id)
+            )
+            return (await session.execute(stmt)).scalar_one()
+
+    async def list_podcasts(self, *, limit: int = 200) -> list[StoredPodcast]:
+        async with self._db.session() as session:
+            stmt = (
+                select(Podcast)
+                .order_by(Podcast.iso_year.desc(), Podcast.iso_week.desc())
+                .limit(limit)
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+        return [
+            StoredPodcast(
+                id=row.id,
+                iso_year=row.iso_year,
+                iso_week=row.iso_week,
+                week_label=row.week_label,
+                title=row.title,
+                audio_url=row.audio_url,
+                page_url=row.page_url,
+                duration_seconds=row.duration_seconds,
+                byte_size=row.byte_size,
+                summary=row.summary,
                 generated_at=row.generated_at,
                 discord_message_id=row.discord_message_id,
                 created_at=row.created_at,

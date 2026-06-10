@@ -5,13 +5,22 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.core.config import EmbeddingProviderName, LLMProviderName, Settings
+from app.core.config import (
+    EmbeddingProviderName,
+    LLMProviderName,
+    Settings,
+    TTSProviderName,
+)
 from app.infrastructure.embeddings.factory import build_embedding_provider
 from app.infrastructure.embeddings.hash_embeddings import HashEmbeddingProvider
 from app.infrastructure.embeddings.openai_embeddings import OpenAIEmbeddingProvider
 from app.infrastructure.llm.anthropic_provider import AnthropicLLMProvider
 from app.infrastructure.llm.factory import build_llm_provider
 from app.infrastructure.llm.openai_provider import OpenAILLMProvider, OpenRouterLLMProvider
+from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTS
+from app.infrastructure.tts.factory import build_tts_provider
+from app.infrastructure.tts.gemini_tts import GeminiTTS
+from app.infrastructure.tts.null_tts import NullTTS
 
 
 def _settings(**kwargs) -> Settings:
@@ -72,3 +81,29 @@ async def test_build_embeddings_openai_without_key_falls_back() -> None:
             _settings(embedding_provider=EmbeddingProviderName.OPENAI), client
         )
         assert isinstance(provider, HashEmbeddingProvider)
+
+
+async def test_build_tts_elevenlabs_with_key() -> None:
+    async with httpx.AsyncClient() as client:
+        provider = build_tts_provider(
+            _settings(tts_provider=TTSProviderName.ELEVENLABS, elevenlabs_api_key="k"), client
+        )
+        assert isinstance(provider, ElevenLabsTTS)
+
+
+async def test_build_tts_gemini_with_key() -> None:
+    async with httpx.AsyncClient() as client:
+        provider = build_tts_provider(
+            _settings(tts_provider=TTSProviderName.GEMINI, gemini_api_key="k"), client
+        )
+        assert isinstance(provider, GeminiTTS)
+
+
+async def test_build_tts_without_key_falls_back_to_null() -> None:
+    async with httpx.AsyncClient() as client:
+        assert isinstance(
+            build_tts_provider(_settings(tts_provider=TTSProviderName.GEMINI), client), NullTTS
+        )
+        assert isinstance(
+            build_tts_provider(_settings(tts_provider=TTSProviderName.ELEVENLABS), client), NullTTS
+        )

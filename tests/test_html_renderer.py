@@ -40,6 +40,19 @@ def _newsletter(entries) -> Newsletter:
     )
 
 
+def test_embeds_podcast_player_when_url_given() -> None:
+    nl = _newsletter([_entry(title="Titular A")])
+    url = "https://anfaia.github.io/newsletter/podcast/2026-W23.mp3"
+    html = render_newsletter_html(nl, podcast_url=url)
+    assert "<audio controls" in html
+    assert url in html
+    assert "Escucha el podcast" in html
+    # Without a URL there is no player (boletín unchanged).
+    assert "<audio" not in render_newsletter_html(nl)
+    # An unsafe (non http/s) URL is not embedded.
+    assert "<audio" not in render_newsletter_html(nl, podcast_url="javascript:alert(1)")
+
+
 def test_renders_structure_and_branding() -> None:
     html = render_newsletter_html(
         _newsletter([_entry(title="Titular A"), _entry(title="Titular B")]),

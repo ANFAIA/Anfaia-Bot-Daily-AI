@@ -25,6 +25,13 @@ class EmbeddingProviderName(StrEnum):
     HASH = "hash"
 
 
+class TTSProviderName(StrEnum):
+    """Text-to-speech backend for the weekly podcast."""
+
+    ELEVENLABS = "elevenlabs"
+    GEMINI = "gemini"  # Google Gemini multi-speaker TTS (NotebookLM-style voices)
+
+
 class WorkflowEngine(StrEnum):
     """Orchestration engine for the daily pipeline."""
 
@@ -113,6 +120,39 @@ class Settings(BaseSettings):
     github_repo: str | None = None
     github_branch: str = "gh-pages"
 
+    # --- Weekly podcast (generated from the newsletter) ---
+    podcast_enabled: bool = False
+    # Which TTS backend voices the episode.
+    tts_provider: TTSProviderName = TTSProviderName.ELEVENLABS
+    # ElevenLabs.
+    elevenlabs_api_key: str | None = None
+    elevenlabs_model: str = "eleven_multilingual_v2"
+    # Google Gemini multi-speaker TTS (NotebookLM-style). The voices below are
+    # interpreted as Gemini prebuilt voice names (e.g. "Kore", "Puck").
+    gemini_api_key: str | None = None
+    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
+    # Per-host "voice": an ElevenLabs voice id OR a Gemini prebuilt voice name,
+    # depending on `tts_provider`. Plus the display names used in the script.
+    podcast_voice_a: str | None = None
+    podcast_voice_b: str | None = None
+    podcast_voice_a_name: str = "Lucía"
+    podcast_voice_b_name: str = "Mateo"
+    # Target episode length (minutes) guiding the scriptwriter.
+    podcast_target_minutes: int = 8
+    # Folder under the static host for the MP3s and feed.xml.
+    podcast_path_prefix: str = "podcast"
+    # RSS channel metadata.
+    podcast_title: str = "Anfaia Weekly AI"
+    podcast_author: str = "Anfaia"
+    podcast_description: str = (
+        "El repaso semanal en español de las noticias de IA más relevantes, "
+        "en formato conversación."
+    )
+    podcast_language: str = "es-ES"
+    podcast_email: str | None = None
+    # Optional separate Discord channel for the podcast announcement.
+    podcast_discord_channel_id: int | None = None
+
     # --- Orchestration ---
     # `sequential` (default) keeps the deterministic single-shot pipeline.
     # `deepagents` delegates the editorial decision to a deliberative agent.
@@ -139,6 +179,12 @@ class Settings(BaseSettings):
         "github_owner",
         "github_repo",
         "newsletter_base_url",
+        "elevenlabs_api_key",
+        "gemini_api_key",
+        "podcast_voice_a",
+        "podcast_voice_b",
+        "podcast_email",
+        "podcast_discord_channel_id",
         mode="before",
     )
     @classmethod

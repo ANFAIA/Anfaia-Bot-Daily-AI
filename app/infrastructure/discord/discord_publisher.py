@@ -21,9 +21,11 @@ from tenacity import (
 from app.core.logging import get_logger
 from app.domain.entities import PublishableArticle
 from app.domain.newsletter import Newsletter
+from app.domain.podcast import PodcastEpisode
 from app.infrastructure.discord.embed_builder import (
     build_article_embed,
     build_newsletter_announcement_embed,
+    build_podcast_announcement_embed,
 )
 from app.interfaces.publisher import Publisher, PublisherError
 
@@ -39,7 +41,12 @@ class DiscordPublisher(Publisher):
     """Publishes articles as embeds in a Discord channel."""
 
     def __init__(
-        self, token: str, channel_id: int, *, newsletter_channel_id: int | None = None
+        self,
+        token: str,
+        channel_id: int,
+        *,
+        newsletter_channel_id: int | None = None,
+        podcast_channel_id: int | None = None,
     ) -> None:
         if not token or not channel_id:
             raise ValueError("DISCORD_TOKEN y DISCORD_CHANNEL_ID son obligatorios")
@@ -47,6 +54,8 @@ class DiscordPublisher(Publisher):
         self._channel_id = channel_id
         # The newsletter goes to its own channel when configured; otherwise the main one.
         self._newsletter_channel_id = newsletter_channel_id or channel_id
+        # The podcast falls back to the newsletter channel when not set explicitly.
+        self._podcast_channel_id = podcast_channel_id or self._newsletter_channel_id
 
     async def _send(
         self,
@@ -134,6 +143,23 @@ class DiscordPublisher(Publisher):
             message_id=message_id,
             url=url,
             channel_id=self._newsletter_channel_id,
+        )
+        return message_id
+
+    @retry(
+        retry=retry_if_exception_type((discord.HTTPException, ConnectionError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=2, max=20),
+        reraise=True,
+    )
+    async def publish_podcast_announcement(self, episode: PodcastEpisode, url: str) -> int:
+        embed = build_podcast_announcement_embed(episode, url)
+        message_id = await self._send(embed=embed, channel_id=self._podcast_channel_id)
+        logger.info(
+            "discord.podcast_announced",
+            message_id=message_id,
+            url=url,
+            channel_id=self._podcast_channel_id,
         )
         return message_id
 

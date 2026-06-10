@@ -8,6 +8,7 @@ import pytest
 
 from app.domain.entities import NewsItem, PublishableArticle
 from app.domain.newsletter import Newsletter
+from app.domain.podcast import PodcastEpisode
 from app.infrastructure.embeddings.hash_embeddings import HashEmbeddingProvider
 from app.infrastructure.persistence.in_memory import InMemoryNewsRepository
 from app.interfaces.llm import ChatMessage, LLMProvider
@@ -103,6 +104,7 @@ class FakePublisher(Publisher):
         self.published: list[PublishableArticle] = []
         self.tests: list[str] = []
         self.announcements: list[tuple[Newsletter, str]] = []
+        self.podcast_announcements: list[tuple[PodcastEpisode, str]] = []
         self._next_id = 1000
 
     async def publish(self, article: PublishableArticle) -> int:
@@ -120,16 +122,30 @@ class FakePublisher(Publisher):
         self._next_id += 1
         return self._next_id
 
+    async def publish_podcast_announcement(self, episode: PodcastEpisode, url: str) -> int:
+        self.podcast_announcements.append((episode, url))
+        self._next_id += 1
+        return self._next_id
+
 
 class FakeSitePublisher(SitePublisher):
     """Records published pages and returns a deterministic public URL."""
 
     def __init__(self, base_url: str = "https://fake.github.io/newsbot") -> None:
         self.pages: list[tuple[str, str]] = []  # (path, html)
+        self.assets: list[tuple[str, bytes, str]] = []  # (path, content, content_type)
         self._base_url = base_url.rstrip("/")
 
     async def publish_html(self, *, path: str, html: str, commit_message: str) -> PublishedSite:
         self.pages.append((path, html))
+        return PublishedSite(
+            public_url=f"{self._base_url}/{path.lstrip('/')}", path=path, commit_sha="deadbeef"
+        )
+
+    async def publish_bytes(
+        self, *, path: str, content: bytes, content_type: str, commit_message: str
+    ) -> PublishedSite:
+        self.assets.append((path, content, content_type))
         return PublishedSite(
             public_url=f"{self._base_url}/{path.lstrip('/')}", path=path, commit_sha="deadbeef"
         )
@@ -139,6 +155,11 @@ class BrokenSitePublisher(SitePublisher):
     """Site publisher that always fails, to exercise the failure path."""
 
     async def publish_html(self, *, path: str, html: str, commit_message: str) -> PublishedSite:
+        raise SitePublisherError("hosting caído")
+
+    async def publish_bytes(
+        self, *, path: str, content: bytes, content_type: str, commit_message: str
+    ) -> PublishedSite:
         raise SitePublisherError("hosting caído")
 
 

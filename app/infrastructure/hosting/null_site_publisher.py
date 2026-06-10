@@ -15,9 +15,17 @@ logger = get_logger(__name__)
 class NullSitePublisher(SitePublisher):
     """Inert implementation of the `SitePublisher` port."""
 
+    _NOT_CONFIGURED = (
+        "GitHub Pages no está configurado (define GITHUB_TOKEN, GITHUB_OWNER, "
+        "GITHUB_REPO y NEWSLETTER_BASE_URL)"
+    )
+
     async def publish_html(self, *, path: str, html: str, commit_message: str) -> PublishedSite:
         logger.error("site_publisher.not_configured", path=path)
-        raise SitePublisherError(
-            "GitHub Pages no está configurado (define GITHUB_TOKEN, GITHUB_OWNER, "
-            "GITHUB_REPO y NEWSLETTER_BASE_URL)"
-        )
+        raise SitePublisherError(self._NOT_CONFIGURED)
+
+    async def publish_bytes(
+        self, *, path: str, content: bytes, content_type: str, commit_message: str
+    ) -> PublishedSite:
+        logger.error("site_publisher.not_configured", path=path)
+        raise SitePublisherError(self._NOT_CONFIGURED)

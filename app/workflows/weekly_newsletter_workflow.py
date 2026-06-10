@@ -33,6 +33,7 @@ from app.interfaces.embeddings import EmbeddingProvider
 from app.interfaces.publisher import Publisher, PublisherError
 from app.interfaces.repositories import NewsRepository, StoredNewsletter
 from app.interfaces.site_publisher import SitePublisher, SitePublisherError
+from app.workflows.podcast_workflow import PodcastWorkflow
 
 logger = get_logger(__name__)
 
@@ -100,6 +101,7 @@ class WeeklyNewsletterWorkflow:
         dedup_threshold: float,
         timezone: str,
         path_prefix: str,
+        podcast_workflow: PodcastWorkflow | None = None,
     ) -> None:
         self._collector = collector
         self._classifier = classifier
@@ -116,6 +118,7 @@ class WeeklyNewsletterWorkflow:
         self._top_n = max(1, top_n)
         self._extra_relevance = extra_relevance
         self._dedup_threshold = dedup_threshold
+        self._podcast_workflow = podcast_workflow
         self._tz = ZoneInfo(timezone)
         self._path_prefix = path_prefix.strip("/")
         # Relative link from a permalink (under path_prefix) back to the root index.
@@ -185,8 +188,12 @@ class WeeklyNewsletterWorkflow:
         overview = await self._overview_generator.run(list(entries))
         newsletter = self._build_newsletter(tuple(entries), overview)
 
-        # 7. Render the weekly page (with a "back to index" link).
-        html = self._render(newsletter, index_href=self._index_href)
+        # 6b. Generate the podcast (best effort) BEFORE rendering, so its audio
+        # URL can be embedded in the page. A failure here never blocks the boletín.
+        podcast_url = await self._maybe_make_podcast(newsletter, report)
+
+        # 7. Render the weekly page (with a "back to index" link + optional player).
+        html = self._render(newsletter, index_href=self._index_href, podcast_url=podcast_url)
 
         # 8. Publish the weekly permalink to GitHub Pages. Abort on failure.
         slug = f"{newsletter.iso_year}-W{newsletter.iso_week:02d}.html"
@@ -239,6 +246,24 @@ class WeeklyNewsletterWorkflow:
 
         # 12. Rebuild the index page from the recorded newsletters (non-fatal).
         await self._publish_index(report)
+
+    async def _maybe_make_podcast(
+        self, newsletter: Newsletter, report: NewsletterReport
+    ) -> str | None:
+        """Run the podcast sub-workflow if configured; return the audio URL or None."""
+        if self._podcast_workflow is None:
+            return None
+        try:
+            episode = await self._podcast_workflow.run(newsletter)
+        except Exception as exc:  # defensive: the podcast must never break the boletín
+            logger.warning("newsletter.podcast_failed", error=str(exc))
+            report.errors.append(f"No se pudo generar el podcast: {exc}")
+            return None
+        if episode is None:
+            report.errors.append("No se pudo generar el podcast de la semana")
+            return None
+        report.podcast_url = episode.audio_url
+        return episode.audio_url
 
     async def _publish_index(self, report: NewsletterReport) -> None:
         """Regenerate index.html linking to every recorded newsletter (best effort)."""

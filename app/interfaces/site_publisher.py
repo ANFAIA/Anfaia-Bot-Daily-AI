@@ -34,3 +34,16 @@ class SitePublisher(ABC):
         Raises:
             SitePublisherError: if publishing fails permanently.
         """
+
+    @abstractmethod
+    async def publish_bytes(
+        self, *, path: str, content: bytes, content_type: str, commit_message: str
+    ) -> PublishedSite:
+        """Publish raw ``content`` (e.g. an MP3 or an RSS feed) at ``path``.
+
+        ``content_type`` is the MIME type of the asset (used by callers for
+        announcements/feeds; the static host serves it by file extension).
+
+        Raises:
+            SitePublisherError: if publishing fails permanently.
+        """

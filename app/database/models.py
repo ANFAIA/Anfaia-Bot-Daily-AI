@@ -97,6 +97,30 @@ class Newsletter(Base):
     __table_args__ = (UniqueConstraint("iso_year", "iso_week", name="uq_newsletter_year_week"),)
 
 
+class Podcast(Base):
+    """A weekly podcast episode published to GitHub Pages (audio + RSS item)."""
+
+    __tablename__ = "podcasts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    iso_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    iso_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    week_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    audio_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    page_url: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    discord_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (UniqueConstraint("iso_year", "iso_week", name="uq_podcast_year_week"),)
+
+
 class WorkflowCounter(Base):
     """Persistent aggregate counter for the administration statistics."""
 

@@ -15,3 +15,6 @@ htmlcov/
 .mypy_cache/
 *.log
 .DS_Store
+
+# Local podcast dry-run output (scripts/test_podcast.py)
+out/

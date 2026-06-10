@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 
 import httpx
@@ -80,6 +81,30 @@ async def test_put_error_raises() -> None:
             )
 
 
+@respx.mock
+async def test_publish_bytes_commits_binary_asset() -> None:
+    contents = "https://api.github.com/repos/o/r/contents/podcast/2026-W23.mp3"
+    respx.get(contents).mock(return_value=httpx.Response(404))
+    put = respx.put(contents).mock(
+        return_value=httpx.Response(201, json={"commit": {"sha": "abc123"}})
+    )
+    async with httpx.AsyncClient() as client:
+        result = await _publisher(client).publish_bytes(
+            path="podcast/2026-W23.mp3",
+            content=b"\x00\x01\x02ID3",
+            content_type="audio/mpeg",
+            commit_message="msg",
+        )
+    assert result.public_url == "https://o.github.io/r/podcast/2026-W23.mp3"
+    # The binary payload is base64-encoded into the commit body.
+    body = json.loads(put.calls.last.request.content)
+    assert base64.b64decode(body["content"]) == b"\x00\x01\x02ID3"
+
+
 async def test_null_site_publisher_raises() -> None:
     with pytest.raises(SitePublisherError):
         await NullSitePublisher().publish_html(path="x.html", html="x", commit_message="m")
+    with pytest.raises(SitePublisherError):
+        await NullSitePublisher().publish_bytes(
+            path="x.mp3", content=b"x", content_type="audio/mpeg", commit_message="m"
+        )

@@ -11,6 +11,7 @@ import discord
 from app.domain.category_colors import DEFAULT_COLOR, category_color
 from app.domain.entities import PublishableArticle
 from app.domain.newsletter import Newsletter
+from app.domain.podcast import PodcastEpisode
 
 _MAX_FIELD = 1024  # Discord limit per embed field
 
@@ -74,4 +75,22 @@ def build_newsletter_announcement_embed(newsletter: Newsletter, url: str) -> dis
     embed.set_footer(
         text=f"{newsletter.count} noticias · {newsletter.generated_at.strftime('%d/%m/%Y')}"
     )
+    return embed
+
+
+def build_podcast_announcement_embed(episode: PodcastEpisode, url: str) -> discord.Embed:
+    """Create the embed announcing a published weekly podcast episode."""
+    minutes = max(1, round(episode.duration_seconds / 60))
+    description = (
+        f"Ya puedes escuchar el podcast de la semana ({minutes} min), un diálogo que "
+        f"repasa las noticias de IA más relevantes.\n\n👉 **[Escuchar el episodio]({url})**"
+    )
+    embed = discord.Embed(
+        title=f"🎧 {episode.title}",
+        url=url,
+        description=description,
+        color=DEFAULT_COLOR,
+    )
+    embed.set_author(name="Anfaia Weekly AI · Podcast")
+    embed.set_footer(text=f"{episode.week_label} · ~{minutes} min")
     return embed

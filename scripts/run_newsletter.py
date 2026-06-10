@@ -40,6 +40,7 @@ async def main() -> int:
         "published": report.published_count,
         "public_url": report.public_url,
         "discord_message_id": report.discord_message_id,
+        "podcast_url": report.podcast_url,
         "errors": report.errors,
     }
     print(json.dumps(payload, indent=2, ensure_ascii=False))
