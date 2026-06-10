@@ -11,8 +11,21 @@ from app.agents.newsletter_overview import NewsletterOverviewAgent
 from app.domain.entities import DiscussionPrompt, EditedArticle, NewsItem
 from app.domain.newsletter import NewsletterEntry
 from app.domain.value_objects import Category, RelevanceScore
+from app.interfaces.article_fetcher import ArticleFetcher
 from app.interfaces.llm import ChatMessage, LLMProvider
 from tests.conftest import BrokenLLM, FakeLLM, FakeSource
+
+
+class FakeFetcher(ArticleFetcher):
+    """Article fetcher returning a fixed text (or None)."""
+
+    def __init__(self, text: str | None) -> None:
+        self._text = text
+        self.requested: list[str] = []
+
+    async def fetch(self, url: str) -> str | None:
+        self.requested.append(url)
+        return self._text
 
 
 def _overview_entry(title: str = "Titular") -> NewsletterEntry:
@@ -96,6 +109,48 @@ async def test_editor_fallback(news_item: NewsItem) -> None:
     edited = await agent.run(news_item)
     assert edited.title == news_item.title
     assert edited.what_happened
+
+
+async def test_editor_uses_fetched_article(fake_llm, news_item: NewsItem) -> None:
+    fetcher = FakeFetcher("Texto completo del artículo con muchos más detalles.")
+    agent = NewsEditorAgent(fake_llm, article_fetcher=fetcher)
+    await agent.run(news_item)
+
+    assert fetcher.requested == [news_item.url]
+    user_msg = next(m.content for m in fake_llm.calls[-1] if m.role == "user")
+    assert "Texto completo del artículo" in user_msg
+
+
+async def test_editor_falls_back_to_summary_when_fetch_fails(
+    fake_llm, news_item: NewsItem
+) -> None:
+    agent = NewsEditorAgent(fake_llm, article_fetcher=FakeFetcher(None))
+    await agent.run(news_item)
+
+    user_msg = next(m.content for m in fake_llm.calls[-1] if m.role == "user")
+    assert news_item.raw_content in user_msg
+
+
+async def test_classifier_heuristic_penalizes_clickbait() -> None:
+    sober = NewsItem(
+        title="New AI model improves benchmark results",
+        url="https://e.com/sober",
+        source="s",
+        summary="ai model",
+    )
+    clickbait = NewsItem(
+        title="Shocking: you won't believe what this AI model does",
+        url="https://e.com/clickbait",
+        source="s",
+        summary="ai model",
+    )
+    agent = NewsClassifierAgent(BrokenLLM())  # forces the heuristic path
+
+    sober_score = (await agent.run(sober)).relevance_score
+    clickbait_score = (await agent.run(clickbait)).relevance_score
+    assert sober_score is not None and clickbait_score is not None
+    assert clickbait_score.value < sober_score.value
+    assert clickbait_score.value < 45  # below the default publication threshold
 
 
 async def test_discussion_with_llm(fake_llm, news_item: NewsItem) -> None:

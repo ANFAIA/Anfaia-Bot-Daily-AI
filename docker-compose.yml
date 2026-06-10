@@ -40,6 +40,9 @@ services:
       TZ: Europe/Madrid
     ports:
       - "8000:8000"
+    volumes:
+      # Persist the TTS line cache (TTS_CACHE_DIR) across container recreations.
+      - tts_cache:/app/var
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,3 +50,4 @@ services:
 
 volumes:
   postgres_data:
+  tts_cache:

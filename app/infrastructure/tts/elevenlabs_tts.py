@@ -19,6 +19,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from app.core.logging import get_logger
 from app.domain.podcast import PodcastLine
+from app.infrastructure.tts.cache import FileAudioCache
 from app.interfaces.tts import SynthesizedAudio, TextToSpeechProvider, TTSError
 
 logger = get_logger(__name__)
@@ -39,11 +40,13 @@ class ElevenLabsTTS(TextToSpeechProvider):
         *,
         api_key: str,
         model_id: str = "eleven_multilingual_v2",
+        cache: FileAudioCache | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("ElevenLabsTTS requiere ELEVENLABS_API_KEY")
         self._client = client
         self._model_id = model_id
+        self._cache = cache
         self._headers = {
             "xi-api-key": api_key,
             "Accept": _CONTENT_TYPE,
@@ -61,11 +64,20 @@ class ElevenLabsTTS(TextToSpeechProvider):
 
         chunks: list[bytes] = []
         words = 0
+        cache_hits = 0
         for index, line in enumerate(lines):
-            audio = await self._synthesize_line(voice_map[line.speaker], line.text)
+            voice_id = voice_map[line.speaker]
+            audio = self._cached_line(voice_id, line.text)
+            if audio is None:
+                audio = await self._synthesize_line(voice_id, line.text)
+                self._store_line(voice_id, line.text, audio)
+            else:
+                cache_hits += 1
             chunks.append(audio)
             words += len(line.text.split())
             logger.info("tts.line_synthesized", index=index, speaker=line.speaker, bytes=len(audio))
+        if cache_hits:
+            logger.info("tts.cache_hits", hits=cache_hits, total=len(lines))
 
         data = b"".join(chunks)
         duration = max(1, round(words / _WORDS_PER_SECOND))
@@ -73,6 +85,18 @@ class ElevenLabsTTS(TextToSpeechProvider):
         return SynthesizedAudio(
             data=data, content_type=_CONTENT_TYPE, duration_seconds=duration, extension="mp3"
         )
+
+    def _cache_key(self, voice_id: str, text: str) -> str:
+        return FileAudioCache.key(self._model_id, _OUTPUT_FORMAT, voice_id, text)
+
+    def _cached_line(self, voice_id: str, text: str) -> bytes | None:
+        if self._cache is None:
+            return None
+        return self._cache.get(self._cache_key(voice_id, text))
+
+    def _store_line(self, voice_id: str, text: str, audio: bytes) -> None:
+        if self._cache is not None:
+            self._cache.put(self._cache_key(voice_id, text), audio)
 
     @retry(
         retry=retry_if_exception_type(httpx.HTTPError),

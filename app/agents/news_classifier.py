@@ -17,6 +17,25 @@ from app.interfaces.llm import ChatMessage, LLMProvider
 
 logger = get_logger(__name__)
 
+# Markers of sensationalist headlines penalized by the fallback heuristic.
+_CLICKBAIT_MARKERS: tuple[str, ...] = (
+    "you won't believe",
+    "no creerás",
+    "no te imaginas",
+    "shocking",
+    "impactante",
+    "changes everything",
+    "cambia todo",
+    "cambiará tu vida",
+    "el fin de",
+    "the end of",
+    "nadie se lo esperaba",
+    "secret",
+    "el secreto",
+    "mind-blowing",
+    "alucinante",
+)
+
 _KEYWORDS: dict[Category, tuple[str, ...]] = {
     Category.AGENTS: ("agent", "agentic", "multi-agent", "tool use", "autonomous"),
     Category.ROBOTICS: ("robot", "robotics", "humanoid", "embodied", "drone"),
@@ -71,6 +90,8 @@ class NewsClassifierAgent(Agent[NewsItem, NewsItem]):
             hits = sum(1 for kw in keywords if kw in text)
             if hits > best_hits:
                 best_hits, best_category = hits, category
-        # Base score from the number of matches, clamped.
-        score = RelevanceScore.clamped(45 + best_hits * 10)
+        # Base score from the number of matches, with a clickbait penalty.
+        title = item.title.lower()
+        clickbait_hits = sum(1 for marker in _CLICKBAIT_MARKERS if marker in title)
+        score = RelevanceScore.clamped(45 + best_hits * 10 - clickbait_hits * 25)
         return item.with_classification(best_category, score)

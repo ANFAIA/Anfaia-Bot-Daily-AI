@@ -9,6 +9,7 @@ implementation (LLM, source, repository, publisher) without touching the rest.
 from __future__ import annotations
 
 from functools import partial
+from pathlib import Path
 
 import httpx
 
@@ -31,7 +32,7 @@ from app.application.use_cases import (
     RunWeeklyNewsletterUseCase,
     SendTestMessageUseCase,
 )
-from app.core.config import Settings, WorkflowEngine
+from app.core.config import PodcastEngineName, Settings, WorkflowEngine
 from app.core.logging import get_logger
 from app.database.repositories import SqlAlchemyNewsRepository
 from app.database.session import Database
@@ -46,10 +47,16 @@ from app.infrastructure.newsletter.html_renderer import (
     render_index_html,
     render_newsletter_html,
 )
+from app.infrastructure.podcast.classic_producer import ClassicPodcastProducer
+from app.infrastructure.podcast.genfm_producer import GenFMPodcastProducer
 from app.infrastructure.podcast.rss_renderer import PodcastFeedMeta, render_podcast_rss
+from app.infrastructure.sources.article_fetcher import HttpArticleFetcher
 from app.infrastructure.sources.registry import build_default_sources
+from app.infrastructure.tts.cache import FileAudioCache
+from app.infrastructure.tts.elevenlabs_assets import fetch_history_audio
 from app.infrastructure.tts.factory import build_tts_provider
 from app.interfaces.editorial import EditorialBrain
+from app.interfaces.podcast_producer import PodcastProducer
 from app.interfaces.publisher import Publisher
 from app.interfaces.repositories import NewsRepository
 from app.interfaces.site_publisher import SitePublisher
@@ -57,10 +64,21 @@ from app.interfaces.tts import TextToSpeechProvider
 from app.workflows.base import NewsWorkflow
 from app.workflows.daily_news_workflow import DailyNewsWorkflow
 from app.workflows.deepagents_news_workflow import DeepAgentsNewsWorkflow
-from app.workflows.podcast_workflow import PodcastWorkflow
+from app.workflows.podcast_workflow import JingleSource, PodcastWorkflow
 from app.workflows.weekly_newsletter_workflow import WeeklyNewsletterWorkflow
 
 logger = get_logger(__name__)
+
+
+def _load_audio_asset(path: str | None, label: str) -> bytes | None:
+    """Load a podcast jingle from disk; a missing file disables it (non-fatal)."""
+    if not path:
+        return None
+    try:
+        return Path(path).read_bytes()
+    except OSError as exc:
+        logger.warning("container.podcast_asset_missing", asset=label, path=path, error=str(exc))
+        return None
 
 
 class Container:
@@ -90,7 +108,12 @@ class Container:
         self.publisher: Publisher = self._build_publisher(settings)
         self.site_publisher: SitePublisher = self._build_site_publisher(settings)
         self.tts: TextToSpeechProvider = build_tts_provider(settings, self.http_client)
-        self.sources = build_default_sources(self.http_client)
+        self.sources = build_default_sources(
+            self.http_client,
+            rss_feeds=settings.rss_feed_list,
+            subreddits=settings.reddit_subreddit_list,
+            hackernews_enabled=settings.hackernews_enabled,
+        )
 
         # --- Agents ---
         self.collector_agent = NewsCollectorAgent(
@@ -102,7 +125,12 @@ class Container:
             self.embeddings,
             similarity_threshold=settings.duplicate_similarity_threshold,
         )
-        self.editor_agent = NewsEditorAgent(self.llm)
+        self.article_fetcher = (
+            HttpArticleFetcher(self.http_client, max_chars=settings.article_fetch_max_chars)
+            if settings.article_fetch_enabled
+            else None
+        )
+        self.editor_agent = NewsEditorAgent(self.llm, article_fetcher=self.article_fetcher)
         self.discussion_agent = DiscussionGeneratorAgent(self.llm)
         self.overview_agent = NewsletterOverviewAgent(self.llm)
         self.scriptwriter_agent = PodcastScriptwriterAgent(
@@ -183,10 +211,37 @@ class Container:
             min_relevance_score=settings.min_relevance_score,
         )
 
-    def _build_podcast_workflow(self, settings: Settings) -> PodcastWorkflow | None:
-        """Build the podcast workflow when enabled, else None (boletín unaffected)."""
-        if not settings.podcast_enabled:
-            return None
+    def build_podcast_producer(self) -> PodcastProducer:
+        """Build the episode producer selected by `settings.podcast_engine`.
+
+        GenFM needs the ElevenLabs key and both voice ids; if anything is
+        missing it degrades to the classic engine with a warning instead of
+        breaking the weekly run.
+        """
+        settings = self.settings
+        if settings.podcast_engine is PodcastEngineName.GENFM:
+            if (
+                settings.elevenlabs_api_key
+                and settings.podcast_voice_a
+                and settings.podcast_voice_b
+            ):
+                logger.info("container.podcast_engine", engine="genfm")
+                return GenFMPodcastProducer(
+                    self.http_client,
+                    api_key=settings.elevenlabs_api_key,
+                    model_id=settings.elevenlabs_model,
+                    host_voice_id=settings.podcast_voice_a,
+                    guest_voice_id=settings.podcast_voice_b,
+                    language=settings.genfm_language,
+                    target_minutes=settings.podcast_target_minutes,
+                    instructions=settings.genfm_instructions,
+                    poll_seconds=settings.genfm_poll_seconds,
+                    timeout_seconds=settings.genfm_timeout_seconds,
+                )
+            logger.warning(
+                "container.genfm_not_configured",
+                reason="faltan ELEVENLABS_API_KEY o PODCAST_VOICE_A/B; se usa 'classic'",
+            )
         voice_map = {
             speaker: voice
             for speaker, voice in (
@@ -195,6 +250,14 @@ class Container:
             )
             if voice
         }
+        return ClassicPodcastProducer(
+            scriptwriter=self.scriptwriter_agent, tts=self.tts, voice_map=voice_map
+        )
+
+    def _build_podcast_workflow(self, settings: Settings) -> PodcastWorkflow | None:
+        """Build the podcast workflow when enabled, else None (boletín unaffected)."""
+        if not settings.podcast_enabled:
+            return None
         base_url = (settings.newsletter_base_url or "https://anfaia.org").rstrip("/")
         prefix = settings.podcast_path_prefix.strip("/")
         feed_meta = PodcastFeedMeta(
@@ -208,15 +271,37 @@ class Container:
             email=settings.podcast_email or "",
         )
         return PodcastWorkflow(
-            scriptwriter=self.scriptwriter_agent,
-            tts=self.tts,
+            producer=self.build_podcast_producer(),
             site_publisher=self.site_publisher,
             publisher=self.publisher,
             feed_renderer=partial(render_podcast_rss, meta=feed_meta),
             repository=self.repository,
-            voice_map=voice_map,
             path_prefix=settings.podcast_path_prefix,
+            intro_audio=self._build_jingle_source(
+                settings, settings.podcast_intro_elevenlabs_id, settings.podcast_intro_path, "intro"
+            ),
+            outro_audio=self._build_jingle_source(
+                settings, settings.podcast_outro_elevenlabs_id, settings.podcast_outro_path, "outro"
+            ),
         )
+
+    def _build_jingle_source(
+        self, settings: Settings, elevenlabs_id: str | None, path: str | None, label: str
+    ) -> JingleSource | None:
+        """Jingle from an ElevenLabs track id (downloaded + cached) or a local file."""
+        if elevenlabs_id:
+            if not settings.elevenlabs_api_key:
+                logger.warning("container.jingle_requires_elevenlabs_key", asset=label)
+            else:
+                cache_dir = settings.tts_cache_dir.strip()
+                return partial(
+                    fetch_history_audio,
+                    self.http_client,
+                    api_key=settings.elevenlabs_api_key,
+                    history_item_id=elevenlabs_id,
+                    cache=FileAudioCache(cache_dir) if cache_dir else None,
+                )
+        return _load_audio_asset(path, label)
 
     @staticmethod
     def _build_publisher(settings: Settings) -> Publisher:

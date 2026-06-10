@@ -10,6 +10,8 @@ import pytest
 import respx
 
 from app.domain.podcast import SPEAKER_A, SPEAKER_B, PodcastLine
+from app.infrastructure.tts.cache import FileAudioCache
+from app.infrastructure.tts.elevenlabs_assets import fetch_history_audio
 from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTS
 from app.infrastructure.tts.gemini_tts import GeminiTTS
 from app.infrastructure.tts.null_tts import NullTTS
@@ -65,6 +67,66 @@ async def test_empty_lines_raises() -> None:
     async with httpx.AsyncClient() as client:
         with pytest.raises(TTSError):
             await _tts(client).synthesize_dialogue([], _VOICE_MAP)
+
+
+@respx.mock
+async def test_cache_reuses_synthesized_lines(tmp_path) -> None:
+    route = respx.post(_URL_A).mock(return_value=httpx.Response(200, content=b"AAA"))
+    cache = FileAudioCache(tmp_path)
+    lines = [PodcastLine(SPEAKER_A, "hola que tal")]
+    async with httpx.AsyncClient() as client:
+        tts = ElevenLabsTTS(client, api_key="k", model_id="m", cache=cache)
+        first = await tts.synthesize_dialogue(lines, _VOICE_MAP)
+        second = await tts.synthesize_dialogue(lines, _VOICE_MAP)
+    # The second run is served entirely from the cache: one single API call.
+    assert first.data == second.data == b"AAA"
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_cache_key_depends_on_text_and_voice(tmp_path) -> None:
+    route_a = respx.post(_URL_A).mock(return_value=httpx.Response(200, content=b"AAA"))
+    route_b = respx.post(_URL_B).mock(return_value=httpx.Response(200, content=b"BB"))
+    cache = FileAudioCache(tmp_path)
+    async with httpx.AsyncClient() as client:
+        tts = ElevenLabsTTS(client, api_key="k", model_id="m", cache=cache)
+        await tts.synthesize_dialogue([PodcastLine(SPEAKER_A, "uno")], _VOICE_MAP)
+        await tts.synthesize_dialogue([PodcastLine(SPEAKER_A, "dos")], _VOICE_MAP)
+        await tts.synthesize_dialogue([PodcastLine(SPEAKER_B, "uno")], _VOICE_MAP)
+    assert route_a.call_count == 2  # different text -> different key
+    assert route_b.call_count == 1  # different voice -> different key
+
+
+def test_file_audio_cache_survives_unwritable_dir() -> None:
+    cache = FileAudioCache("/proc/no-puede-existir/cache")
+    cache.put("k", b"data")  # must not raise
+    assert cache.get("k") is None
+
+
+_HISTORY_URL = "https://api.elevenlabs.io/v1/history/item123/audio"
+
+
+@respx.mock
+async def test_fetch_history_audio_downloads_and_caches(tmp_path) -> None:
+    route = respx.get(_HISTORY_URL).mock(return_value=httpx.Response(200, content=b"JINGLE"))
+    cache = FileAudioCache(tmp_path)
+    async with httpx.AsyncClient() as client:
+        first = await fetch_history_audio(
+            client, api_key="k", history_item_id="item123", cache=cache
+        )
+        second = await fetch_history_audio(
+            client, api_key="k", history_item_id="item123", cache=cache
+        )
+    assert first == second == b"JINGLE"
+    assert route.call_count == 1  # second read comes from the cache
+    assert route.calls.last.request.headers["xi-api-key"] == "k"
+
+
+@respx.mock
+async def test_fetch_history_audio_returns_none_on_error() -> None:
+    respx.get(_HISTORY_URL).mock(return_value=httpx.Response(404, text="not found"))
+    async with httpx.AsyncClient() as client:
+        assert await fetch_history_audio(client, api_key="k", history_item_id="item123") is None
 
 
 async def test_null_tts_raises() -> None:

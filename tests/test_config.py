@@ -65,6 +65,47 @@ def test_github_settings_empty_to_none() -> None:
     assert s.newsletter_base_url is None
 
 
+def test_rss_feeds_default_is_none() -> None:
+    s = _settings(rss_feeds="")
+    assert s.rss_feeds is None
+    assert s.rss_feed_list is None  # None -> use the built-in catalog
+
+
+def test_rss_feeds_parsing_commas_and_newlines() -> None:
+    s = _settings(rss_feeds="Blog A|https://a.com/feed\nBlog B|https://b.com/rss, Blog C|https://c.com/atom")
+    assert s.rss_feed_list == [
+        ("Blog A", "https://a.com/feed"),
+        ("Blog B", "https://b.com/rss"),
+        ("Blog C", "https://c.com/atom"),
+    ]
+
+
+def test_rss_feeds_invalid_entry_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _settings(rss_feeds="sin separador")
+    with pytest.raises(ValidationError):
+        _settings(rss_feeds="Nombre|ftp://no-http.com/feed")
+
+
+def test_reddit_subreddits_parsing() -> None:
+    s = _settings(reddit_subreddits="artificial, LocalLLaMA ,")
+    assert s.reddit_subreddit_list == ["artificial", "LocalLLaMA"]
+    assert _settings(reddit_subreddits="").reddit_subreddit_list == []
+
+
+def test_podcast_jingle_settings_empty_to_none() -> None:
+    s = _settings(
+        podcast_intro_path="",
+        podcast_outro_path="",
+        podcast_intro_elevenlabs_id="",
+        podcast_outro_elevenlabs_id="",
+    )
+    assert s.podcast_intro_path is None
+    assert s.podcast_outro_path is None
+    assert s.podcast_intro_elevenlabs_id is None
+    assert s.podcast_outro_elevenlabs_id is None
+
+
 def test_active_llm_api_key_selection() -> None:
     s = _settings(
         llm_provider=LLMProviderName.ANTHROPIC,

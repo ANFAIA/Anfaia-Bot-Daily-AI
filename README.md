@@ -170,6 +170,11 @@ curl http://localhost:8000/stats
 | `TIMEZONE` | Zona horaria | `Europe/Madrid` |
 | `MIN_RELEVANCE_SCORE` | Score mínimo para publicar | `55` |
 | `MAX_ITEMS_PER_SOURCE` | Items recogidos por fuente | `15` |
+| `RSS_FEEDS` | Catálogo RSS propio: pares `Nombre\|URL` separados por comas (vacío = catálogo por defecto) | — |
+| `REDDIT_SUBREDDITS` | Subreddits monitorizados (separados por comas; vacío desactiva Reddit) | `artificial,MachineLearning` |
+| `HACKERNEWS_ENABLED` | Incluye la fuente de Hacker News | `true` |
+| `ARTICLE_FETCH_ENABLED` | Descarga el artículo completo antes de editar (best-effort) | `true` |
+| `ARTICLE_FETCH_MAX_CHARS` | Tope de caracteres del artículo pasado al editor | `8000` |
 | `WORKFLOW_ENGINE` | Motor de orquestación: `sequential` \| `deepagents` | `sequential` |
 | `EDITORIAL_SHORTLIST_SIZE` | Candidatas únicas entre las que elige el cerebro editorial | `5` |
 | `DEEPAGENTS_RECURSION_LIMIT` | Tope de iteraciones del deep agent | `50` |
@@ -379,6 +384,10 @@ Newsletter (noticias de la semana)
 ```bash
 PODCAST_ENABLED=true
 
+# Motor del episodio: 'classic' (guionista propio + TTS) o 'genfm'
+# (ElevenLabs Studio genera guion y audio; usa las mismas voces A/B).
+PODCAST_ENGINE=classic
+
 # Opción A — ElevenLabs (MP3)
 TTS_PROVIDER=elevenlabs
 ELEVENLABS_API_KEY=...
@@ -398,14 +407,35 @@ PODCAST_TITLE=Anfaia Weekly AI
 PODCAST_EMAIL=podcast@anfaia.org
 # Opcional: canal de Discord propio para el podcast
 PODCAST_DISCORD_CHANNEL_ID=
+# Opcional: sintonía de entrada/salida (MP3 CBR 128 kbps 44.1 kHz)…
+PODCAST_INTRO_PATH=assets/intro.mp3
+PODCAST_OUTRO_PATH=assets/outro.mp3
+# …o el id de una pista generada en ElevenLabs (p. ej. con Eleven Music); se
+# descarga del historial de la cuenta y se cachea. Tiene prioridad sobre la ruta.
+PODCAST_INTRO_ELEVENLABS_ID=
+PODCAST_OUTRO_ELEVENLABS_ID=
+# Caché en disco de las líneas sintetizadas (vacío la desactiva)
+TTS_CACHE_DIR=var/tts_cache
 ```
 
 3. Da de alta el feed `https://<base>/podcast/feed.xml` en **Spotify for
    Podcasters** y **Apple Podcasts Connect** (una sola vez; las nuevas ediciones
    aparecen al regenerarse el feed cada semana).
 
-> Con ElevenLabs el audio se sintetiza turno a turno y se concatenan los MP3
-> (CBR). Con Gemini se usa la **TTS multi-locutor** (NotebookLM-style): el guion
+> Con `PODCAST_ENGINE=genfm` el guion y el audio los genera el podcast
+> generator de ElevenLabs Studio (GenFM): se le envía el contenido del boletín,
+> Studio convierte en segundo plano y el bot descarga el MP3 resultante
+> (preset `standard`, mismo formato que el motor clásico, así que sintonía,
+> RSS y caché de jingles funcionan igual). Pruébalo en local sin publicar con
+> `python scripts/test_podcast.py`.
+>
+> Con el motor clásico y ElevenLabs el audio se sintetiza turno a turno y se concatenan los MP3
+> (CBR); cada línea se cachea en `TTS_CACHE_DIR` por hash de (modelo, voz,
+> texto), así repetir la semana (p. ej. tras un fallo a mitad) no vuelve a pagar
+> la API por las líneas ya sintetizadas. La sintonía de `PODCAST_INTRO_PATH` /
+> `PODCAST_OUTRO_PATH` se antepone/añade al episodio (solo salida MP3: debe ser
+> CBR 128 kbps 44.1 kHz porque se concatena a nivel de bytes).
+> Con Gemini se usa la **TTS multi-locutor** (NotebookLM-style): el guion
 > va etiquetado por hablante y Gemini pone las dos voces en una sola pasada,
 > devolviendo PCM que se envuelve en WAV (sin dependencias de sistema añadidas).
 > En ambos casos la ejecución (API, `scripts/run_newsletter.py`, Docker o

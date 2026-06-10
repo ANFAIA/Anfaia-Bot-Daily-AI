@@ -24,6 +24,14 @@ Devuelve este esquema JSON:
 relevance_score mide el interés para una comunidad técnica de IA:
 90-100 muy relevante y novedoso; 70-89 relevante; 50-69 interesante;
 <50 marginal, ruido o clickbait.
+
+PENALIZA el clickbait y el sensacionalismo: resta puntos cuando el titular
+exagera sin sustancia ("revoluciona", "cambia todo para siempre", "nadie se lo
+esperaba", "el fin de los programadores"), apela al miedo o la curiosidad sin
+dato concreto, oculta el hecho clave para forzar el clic, o es opinión/listicle
+promocional sin novedad técnica. Una noticia sensacionalista sin sustancia
+nunca debe superar 49, aunque el tema sea IA. Valora el hecho técnico
+verificable, no el ruido del titular.
 """
 
 EDITOR_SYSTEM = """\

@@ -39,6 +39,29 @@ class WorkflowEngine(StrEnum):
     DEEPAGENTS = "deepagents"  # deliberative editorial brain (deepagents)
 
 
+class PodcastEngineName(StrEnum):
+    """Engine that produces the weekly episode (script + audio)."""
+
+    CLASSIC = "classic"  # local scriptwriter agent + per-line TTS
+    GENFM = "genfm"  # ElevenLabs Studio podcast generator (script + audio)
+
+
+def _parse_rss_feeds(raw: str) -> list[tuple[str, str]]:
+    """Parse "Name|URL" entries separated by commas or newlines."""
+    feeds: list[tuple[str, str]] = []
+    for entry in (e.strip() for chunk in raw.split("\n") for e in chunk.split(",")):
+        if not entry:
+            continue
+        name, sep, url = entry.partition("|")
+        name, url = name.strip(), url.strip()
+        if not sep or not name or not url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"Entrada RSS inválida: {entry!r}. Formato esperado: 'Nombre|https://...'"
+            )
+        feeds.append((name, url))
+    return feeds
+
+
 def _validate_hhmm(value: str) -> str:
     """Validate a 24h HH:MM time string."""
     hh, _, mm = value.partition(":")
@@ -139,6 +162,29 @@ class Settings(BaseSettings):
     podcast_voice_b_name: str = "Mateo"
     # Target episode length (minutes) guiding the scriptwriter.
     podcast_target_minutes: int = 8
+    # Engine producing the episode: 'classic' (own scriptwriter + TTS) or
+    # 'genfm' (ElevenLabs Studio generates script and audio; needs the
+    # ElevenLabs API key and the two voice ids).
+    podcast_engine: PodcastEngineName = PodcastEngineName.CLASSIC
+    # GenFM tuning: episode language, optional extra style instructions, and
+    # how long to wait for Studio's background conversion.
+    genfm_language: str = "es"
+    genfm_instructions: str | None = None
+    genfm_poll_seconds: float = 10.0
+    genfm_timeout_seconds: float = 900.0
+    # On-disk cache for synthesized audio lines, so re-running a week does not
+    # pay the TTS API again for unchanged lines. Empty disables the cache.
+    tts_cache_dir: str = "var/tts_cache"
+    # Optional intro/outro jingles prepended/appended to the episode. Must be
+    # MP3 files matching the TTS output (CBR 128 kbps, 44.1 kHz); they are
+    # byte-concatenated, so a different encoding would corrupt playback.
+    podcast_intro_path: str | None = None
+    podcast_outro_path: str | None = None
+    # Alternatively, the id of a track generated with ElevenLabs (e.g. Eleven
+    # Music): it is downloaded from the account history and cached on disk.
+    # Takes precedence over the local path when both are set.
+    podcast_intro_elevenlabs_id: str | None = None
+    podcast_outro_elevenlabs_id: str | None = None
     # Folder under the static host for the MP3s and feed.xml.
     podcast_path_prefix: str = "podcast"
     # RSS channel metadata.
@@ -167,6 +213,16 @@ class Settings(BaseSettings):
     min_relevance_score: int = 55
     http_user_agent: str = "AnfaiaDailyAI/0.1 (+https://anfaia.org)"
     http_timeout_seconds: float = 20.0
+    # RSS catalog override: "Name|URL" entries separated by commas or newlines.
+    # Unset/empty keeps the built-in default catalog (see sources/registry.py).
+    rss_feeds: str | None = None
+    # Subreddits to monitor (comma-separated). Empty disables the Reddit source.
+    reddit_subreddits: str = "artificial,MachineLearning"
+    hackernews_enabled: bool = True
+    # Fetch the full article body before editing (best-effort; the editor falls
+    # back to the feed summary when the page cannot be retrieved).
+    article_fetch_enabled: bool = True
+    article_fetch_max_chars: int = 8000
 
     @field_validator(
         "openai_api_key",
@@ -185,6 +241,12 @@ class Settings(BaseSettings):
         "podcast_voice_b",
         "podcast_email",
         "podcast_discord_channel_id",
+        "podcast_intro_path",
+        "podcast_outro_path",
+        "podcast_intro_elevenlabs_id",
+        "podcast_outro_elevenlabs_id",
+        "genfm_instructions",
+        "rss_feeds",
         mode="before",
     )
     @classmethod
@@ -208,6 +270,25 @@ class Settings(BaseSettings):
     @classmethod
     def _validate_times(cls, value: str) -> str:
         return _validate_hhmm(value)
+
+    @field_validator("rss_feeds")
+    @classmethod
+    def _validate_rss_feeds(cls, value: str | None) -> str | None:
+        # Fail fast on malformed entries instead of silently dropping feeds.
+        if value is not None:
+            _parse_rss_feeds(value)
+        return value
+
+    @property
+    def rss_feed_list(self) -> list[tuple[str, str]] | None:
+        """Parsed RSS catalog override, or None to use the built-in defaults."""
+        if self.rss_feeds is None:
+            return None
+        return _parse_rss_feeds(self.rss_feeds)
+
+    @property
+    def reddit_subreddit_list(self) -> list[str]:
+        return [sub.strip() for sub in self.reddit_subreddits.split(",") if sub.strip()]
 
     @property
     def post_hour(self) -> int:

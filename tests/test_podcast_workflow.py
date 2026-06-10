@@ -14,8 +14,14 @@ from app.domain.entities import DiscussionPrompt, EditedArticle, NewsItem
 from app.domain.newsletter import Newsletter, NewsletterEntry
 from app.domain.podcast import PodcastLine
 from app.domain.value_objects import Category, RelevanceScore
+from app.infrastructure.podcast.classic_producer import ClassicPodcastProducer
 from app.infrastructure.podcast.rss_renderer import PodcastFeedMeta, render_podcast_rss
 from app.infrastructure.tts.null_tts import NullTTS
+from app.interfaces.podcast_producer import (
+    PodcastProducer,
+    PodcastProductionError,
+    ProducedEpisode,
+)
 from app.interfaces.tts import SynthesizedAudio, TextToSpeechProvider
 from app.workflows.podcast_workflow import PodcastWorkflow
 from tests.conftest import BrokenLLM, FakePublisher, FakeSitePublisher
@@ -73,18 +79,95 @@ def _feed_renderer():
 
 
 def _workflow(
-    *, tts: TextToSpeechProvider, site: FakeSitePublisher, pub: FakePublisher, repo
+    *, tts: TextToSpeechProvider, site: FakeSitePublisher, pub: FakePublisher, repo, **kwargs
 ) -> PodcastWorkflow:
-    return PodcastWorkflow(
-        scriptwriter=PodcastScriptwriterAgent(BrokenLLM()),  # uses the deterministic fallback
+    producer = ClassicPodcastProducer(
+        scriptwriter=PodcastScriptwriterAgent(BrokenLLM()),  # deterministic fallback script
         tts=tts,
+        voice_map=_VOICE_MAP,
+    )
+    return PodcastWorkflow(
+        producer=producer,
         site_publisher=site,
         publisher=pub,
         feed_renderer=_feed_renderer(),
         repository=repo,
-        voice_map=_VOICE_MAP,
         path_prefix="podcast",
+        **kwargs,
     )
+
+
+class WavTTS(TextToSpeechProvider):
+    """Returns WAV audio, like the Gemini backend."""
+
+    async def synthesize_dialogue(
+        self, lines: Sequence[PodcastLine], voice_map: Mapping[str, str]
+    ) -> SynthesizedAudio:
+        return SynthesizedAudio(
+            data=b"WAVDATA", content_type="audio/wav", duration_seconds=42, extension="wav"
+        )
+
+
+async def test_intro_outro_concatenated_and_duration_extended(repository) -> None:
+    site, pub = FakeSitePublisher(), FakePublisher()
+    intro, outro = b"I" * 32_000, b"O" * 16_000  # 2s + 1s at 16000 bytes/s (128 kbps)
+    workflow = _workflow(
+        tts=FakeTTS(), site=site, pub=pub, repo=repository, intro_audio=intro, outro_audio=outro
+    )
+
+    episode = await workflow.run(_newsletter())
+
+    assert episode is not None
+    _, content, _ = site.assets[0]  # the published episode audio
+    assert content == intro + b"MP3DATA" + outro
+    assert episode.byte_size == len(content)
+    assert episode.duration_seconds == 42 + 3  # FakeTTS estimate + jingles
+
+
+async def test_jingle_from_async_source(repository) -> None:
+    site, pub = FakeSitePublisher(), FakePublisher()
+
+    async def remote_intro() -> bytes:
+        return b"REMOTE_INTRO"
+
+    workflow = _workflow(
+        tts=FakeTTS(), site=site, pub=pub, repo=repository, intro_audio=remote_intro
+    )
+    episode = await workflow.run(_newsletter())
+
+    assert episode is not None
+    _, content, _ = site.assets[0]
+    assert content == b"REMOTE_INTRO" + b"MP3DATA"
+
+
+async def test_failing_jingle_source_publishes_without_it(repository) -> None:
+    site, pub = FakeSitePublisher(), FakePublisher()
+
+    async def broken_intro() -> bytes:
+        raise RuntimeError("descarga caída")
+
+    workflow = _workflow(
+        tts=FakeTTS(), site=site, pub=pub, repo=repository, intro_audio=broken_intro
+    )
+    episode = await workflow.run(_newsletter())
+
+    assert episode is not None  # the jingle is best-effort
+    _, content, _ = site.assets[0]
+    assert content == b"MP3DATA"
+
+
+async def test_branding_skipped_for_non_mp3_audio(repository) -> None:
+    site, pub = FakeSitePublisher(), FakePublisher()
+    workflow = _workflow(
+        tts=WavTTS(), site=site, pub=pub, repo=repository, intro_audio=b"INTRO"
+    )
+
+    episode = await workflow.run(_newsletter())
+
+    assert episode is not None
+    _, content, _ = site.assets[0]
+    assert content == b"WAVDATA"  # published as-is: byte-concat is MP3-only
+    assert episode.duration_seconds == 42
 
 
 async def test_happy_path_publishes_records_feed_and_announces(repository) -> None:
@@ -121,6 +204,27 @@ async def test_returns_none_when_audio_publish_fails(repository) -> None:
     assert episode is None
     assert pub.podcast_announcements == []
     assert not await repository.podcast_exists(2026, 23)
+
+
+class BrokenProducer(PodcastProducer):
+    """Producer that always fails (e.g. GenFM down or conversion timeout)."""
+
+    async def produce(self, newsletter) -> ProducedEpisode:
+        raise PodcastProductionError("GenFM caído")
+
+
+async def test_returns_none_when_producer_fails(repository) -> None:
+    pub = FakePublisher()
+    workflow = PodcastWorkflow(
+        producer=BrokenProducer(),
+        site_publisher=FakeSitePublisher(),
+        publisher=pub,
+        feed_renderer=_feed_renderer(),
+        repository=repository,
+        path_prefix="podcast",
+    )
+    assert await workflow.run(_newsletter()) is None
+    assert pub.podcast_announcements == []
 
 
 async def test_returns_none_when_tts_unconfigured(repository) -> None:

@@ -1,25 +1,26 @@
 """Generate a podcast episode locally WITHOUT publishing anything.
 
-A dry run of the podcast pipeline: it builds a sample weekly newsletter, writes
-the two-host script with the real scriptwriter agent and (optionally) synthesizes
-the audio with the configured TTS — then saves the MP3 and the script to disk.
-It NEVER touches GitHub Pages, Discord or the database.
+A dry run of the podcast pipeline: it builds a sample weekly newsletter and
+produces the episode with the engine selected by PODCAST_ENGINE — `classic`
+(scriptwriter agent + per-line TTS) or `genfm` (ElevenLabs Studio generates
+script and audio) — then saves the audio (and the script, when the engine
+exposes one) to disk. It NEVER touches GitHub Pages, Discord or the database.
 
-Useful to preview the voices/script and tune the prompt before going live.
+Useful to preview the voices/script and compare engines before going live.
 
 Usage:
-    # script + audio (needs ELEVENLABS_API_KEY + PODCAST_VOICE_A/B)
+    # full episode with the configured engine (spends TTS/GenFM credits)
     python scripts/test_podcast.py
 
-    # only the script, no TTS (no ElevenLabs credits spent)
+    # only the classic script, no audio (no credits spent; ignores genfm)
     python scripts/test_podcast.py --script-only
 
     # custom output folder
     python scripts/test_podcast.py --out /tmp/podcast-test
 
 Outputs (in ./out by default):
-    podcast-test.txt   the dialogue script
-    podcast-test.mp3   the synthesized audio (unless --script-only)
+    podcast-test.txt   the dialogue script (classic engine only)
+    podcast-test.mp3   the produced audio (unless --script-only)
 """
 
 from __future__ import annotations
@@ -133,34 +134,48 @@ async def main() -> int:
     try:
         newsletter = _sample_newsletter()
 
-        # 1. Script (real scriptwriter agent; falls back to a canned dialogue if no LLM).
-        script = await container.scriptwriter_agent.run(newsletter)
-        script_path = out_dir / "podcast-test.txt"
-        await asyncio.to_thread(
-            script_path.write_text,
-            _format_script(script, settings.podcast_voice_a_name, settings.podcast_voice_b_name),
-            encoding="utf-8",
-        )
-        print(f"📝 Guion: {len(script.spoken_lines)} turnos, {script.word_count} palabras")
-        print(f"   → {script_path}")
-
         if args.script_only:
+            # Script preview without audio (always the classic scriptwriter:
+            # GenFM does not separate script from audio).
+            script = await container.scriptwriter_agent.run(newsletter)
+            script_path = out_dir / "podcast-test.txt"
+            await asyncio.to_thread(
+                script_path.write_text,
+                _format_script(
+                    script, settings.podcast_voice_a_name, settings.podcast_voice_b_name
+                ),
+                encoding="utf-8",
+            )
+            print(f"📝 Guion: {len(script.spoken_lines)} turnos, {script.word_count} palabras")
+            print(f"   → {script_path}")
             print("⏭️  --script-only: no se sintetiza audio.")
             return 0
 
-        # 2. Audio (real TTS; nothing is published).
-        voice_map = {
-            speaker: voice
-            for speaker, voice in (
-                (SPEAKER_A, settings.podcast_voice_a),
-                (SPEAKER_B, settings.podcast_voice_b),
+        # Produce the full episode with the configured engine; nothing is published.
+        producer = container.build_podcast_producer()
+        print(f"🎙️  Motor: {settings.podcast_engine.value} ({type(producer).__name__})")
+        if settings.podcast_engine.value == "genfm":
+            print("   GenFM convierte en segundo plano; esto puede tardar unos minutos…")
+        produced = await producer.produce(newsletter)
+
+        if produced.script is not None:
+            script_path = out_dir / "podcast-test.txt"
+            await asyncio.to_thread(
+                script_path.write_text,
+                _format_script(
+                    produced.script,
+                    settings.podcast_voice_a_name,
+                    settings.podcast_voice_b_name,
+                ),
+                encoding="utf-8",
             )
-            if voice
-        }
-        audio = await container.tts.synthesize_dialogue(script.spoken_lines, voice_map)
-        audio_path = out_dir / "podcast-test.mp3"
+            print(f"📝 Guion: {produced.script_lines} turnos → {script_path}")
+
+        audio = produced.audio
+        audio_path = out_dir / f"podcast-test.{audio.extension}"
         await asyncio.to_thread(audio_path.write_bytes, audio.data)
         minutes, seconds = divmod(audio.duration_seconds, 60)
+        print(f"🏷️  Título: {produced.title}")
         print(
             f"🎧 Audio: {len(audio.data) / 1024:.0f} KB, "
             f"~{minutes}:{seconds:02d} ({audio.content_type})"

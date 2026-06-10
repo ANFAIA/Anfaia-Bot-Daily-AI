@@ -107,3 +107,61 @@ async def test_build_tts_without_key_falls_back_to_null() -> None:
         assert isinstance(
             build_tts_provider(_settings(tts_provider=TTSProviderName.ELEVENLABS), client), NullTTS
         )
+
+
+def test_load_audio_asset_reads_file_and_tolerates_missing(tmp_path) -> None:
+    from app.core.container import _load_audio_asset
+
+    jingle = tmp_path / "intro.mp3"
+    jingle.write_bytes(b"MP3JINGLE")
+    assert _load_audio_asset(str(jingle), "intro") == b"MP3JINGLE"
+    assert _load_audio_asset(str(tmp_path / "no-existe.mp3"), "outro") is None
+    assert _load_audio_asset(None, "intro") is None
+
+
+async def test_container_selects_podcast_engine() -> None:
+    from app.core.container import Container
+    from app.infrastructure.persistence.in_memory import InMemoryNewsRepository
+    from app.infrastructure.podcast.classic_producer import ClassicPodcastProducer
+    from app.infrastructure.podcast.genfm_producer import GenFMPodcastProducer
+
+    base = {
+        "openai_api_key": "test-key",
+        "embedding_provider": EmbeddingProviderName.HASH,
+        "embedding_dim": 64,
+        "scheduler_enabled": False,
+        "_env_file": None,
+    }
+
+    # GenFM fully configured -> GenFM producer.
+    genfm = Container(
+        Settings(
+            podcast_engine="genfm",
+            elevenlabs_api_key="k",
+            podcast_voice_a="va",
+            podcast_voice_b="vb",
+            **base,
+        ),
+        repository=InMemoryNewsRepository(),
+    )
+    try:
+        assert isinstance(genfm.build_podcast_producer(), GenFMPodcastProducer)
+    finally:
+        await genfm.aclose()
+
+    # GenFM selected but voices missing -> degrades to classic.
+    degraded = Container(
+        Settings(podcast_engine="genfm", elevenlabs_api_key="k", **base),
+        repository=InMemoryNewsRepository(),
+    )
+    try:
+        assert isinstance(degraded.build_podcast_producer(), ClassicPodcastProducer)
+    finally:
+        await degraded.aclose()
+
+    # Default engine -> classic.
+    classic = Container(Settings(**base), repository=InMemoryNewsRepository())
+    try:
+        assert isinstance(classic.build_podcast_producer(), ClassicPodcastProducer)
+    finally:
+        await classic.aclose()

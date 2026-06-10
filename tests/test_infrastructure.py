@@ -178,7 +178,7 @@ async def test_registry_builds_all_sources() -> None:
     assert "OpenAI Blog" in names
     assert "Hacker News" in names
     assert "Reddit r/MachineLearning" in names
-    assert len(sources) == 9
+    assert len(sources) == 11  # 8 RSS + Hacker News + 2 subreddits
 
 
 # --- metrics ---

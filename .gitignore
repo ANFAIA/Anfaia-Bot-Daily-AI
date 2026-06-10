@@ -18,3 +18,6 @@ htmlcov/
 
 # Local podcast dry-run output (scripts/test_podcast.py)
 out/
+
+# TTS audio cache
+var/
